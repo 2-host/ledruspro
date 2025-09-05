@@ -1,0 +1,122 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Category {
+  id    Int       @id @default(autoincrement())
+  name  String
+  slug  String    @unique
+  // связи
+  ProviderCategory ProviderCategory[]
+}
+
+model Provider {
+  id           Int       @id @default(autoincrement())
+  name         String
+  slug         String    @unique
+  title        String?
+  city         String?
+  priceFrom    Int?
+  rating       Float?    @default(0)
+  reviewsCount Int?      @default(0)
+  isVerified   Boolean?  @default(false)
+  passportVerified Boolean  @default(false) 
+  worksByContract  Boolean  @default(false)
+  experienceYears Int       @default(1)
+  ownerEmail   String?
+  website      String?
+  phone        String?
+  about        String?
+  avatarUrl    String?
+  categories   ProviderCategory[]
+  services     Service[]
+  projects     Project[]
+  leads        Lead[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  reviews      Review[]
+
+  @@map("providers")
+}
+
+
+model Review {
+  id           Int       @id @default(autoincrement())
+  provider     Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  providerId   Int
+  rating       Int       // 1..5
+  authorName   String
+  authorAvatar String?
+  text         String
+  verified     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+}
+
+model Service {
+  id          Int      @id @default(autoincrement())
+  providerId  Int
+  name        String
+  unit        String?
+  priceFrom   Int?
+  description String?
+  provider    Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model Project {
+  id         Int      @id @default(autoincrement())
+  providerId Int
+  title      String?
+  imageUrl   String
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model Lead {
+  id         Int      @id @default(autoincrement())
+  providerId Int
+  name       String
+  contact    String
+  message    String?
+  status     String   @default("new")
+  createdAt  DateTime @default(now())
+  provider   Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+}
+
+model ProviderCategory {
+  id          Int      @id @default(autoincrement())
+  providerId  Int
+  categoryId  Int
+  provider    Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, categoryId])
+  @@map("provider_categories")       
+}
+
+// prisma/schema.prisma
+model EmailOtp {
+  id         Int      @id @default(autoincrement())
+  email      String
+  codeHash   String   // sha256 от кода
+  expiresAt  DateTime
+  attempts   Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@index([email])
+}
+
+model EmailVerification {
+  id         Int      @id @default(autoincrement())
+  email      String
+  token      String   @unique
+  expiresAt  DateTime
+  used       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([email])
+}

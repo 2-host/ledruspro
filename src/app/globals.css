@@ -1,26 +1,98 @@
-@import "tailwindcss";
+/* === BRAND TOKENS & BASE === */
+:root{
+  --brand:#0d6efd;           /* primary */
+  --brand-2:#6c63ff;         /* accent */
+  --brand-3:#00b894;         /* accent 2 */
+  --bg-soft:#f8fafc;         /* page bg */
+  --card:#ffffff;            /* card bg */
+  --muted:#6c757d;           /* secondary text */
+  --ring:rgba(13,110,253,.25)
+}
+html,body{ height:100%; }
+body{ background: var(--bg-soft); color:#212529; }
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* === NAVBAR === */
+.navbar{ background:#fff; border-bottom:1px solid rgba(0,0,0,.06); }
+
+/* === HERO === */
+.hero{
+  background:
+    radial-gradient(800px 400px at 20% -20%, rgba(13,110,253,.10), transparent 50%),
+    radial-gradient(600px 300px at 100% 0%, rgba(108,99,255,.12), transparent 60%),
+    radial-gradient(900px 500px at 40% 120%, rgba(0,184,148,.10), transparent 60%),
+    linear-gradient(180deg, #fff 0%, #f6f9ff 60%, #f5fbf8 100%);
+}
+.hero .search{
+  background:#fff; border:1px solid rgba(0,0,0,.06);
+  box-shadow:0 6px 24px rgba(13,110,253,.07); border-radius:1rem;
+}
+.form-control::placeholder{ color:#adb5bd; }
+
+/* === SUBHERO (верх страницы категорий) === */
+.subhero{
+  background:
+    radial-gradient(700px 260px at 0% -20%, rgba(13,110,253,.08), transparent 50%),
+    linear-gradient(180deg,#fff 0%, #f6f9ff 100%);
+  border-bottom:1px solid rgba(0,0,0,.04);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+/* === CHIPS === */
+.chip{
+  display:inline-flex; align-items:center; gap:.35rem;
+  padding:.4rem .7rem; border-radius:999px; background:#fff;
+  border:1px solid rgba(0,0,0,.06); box-shadow:0 2px 10px rgba(0,0,0,.04);
+  font-size:.9rem; color:#495057; text-decoration:none;
+}
+.chip:hover{ border-color:var(--ring); box-shadow:0 6px 16px rgba(13,110,253,.08); }
+
+/* === CATEGORY TILES === */
+.tile{
+  background:var(--card); border:1px solid rgba(0,0,0,.06);
+  border-radius:1rem; padding:1.1rem; transition:.2s ease; height:100%;
+}
+.tile:hover{ transform:translateY(-4px); box-shadow:0 10px 28px rgba(0,0,0,.08); }
+.tile i{ font-size:1.4rem; }
+.tile .title{ font-weight:600; }
+.tile .muted{ color:var(--muted); font-size:.9rem; }
+
+/* === CARDS / LIST ITEMS === */
+.card-modern{
+  background:#fff; border:1px solid rgba(0,0,0,.06);
+  border-radius:1.1rem; box-shadow:0 6px 24px rgba(0,0,0,.06);
+  transition: box-shadow .2s ease, transform .2s ease;
+}
+.card-modern:hover{ transform:translateY(-2px); box-shadow:0 10px 28px rgba(0,0,0,.08); }
+.avatar{ width:56px; height:56px; border-radius:50%; object-fit:cover; background:#f3f4f6; }
+.rating i{ color:#ffb400; }
+.badge-soft{ background:#4a4a4a; color:#fff; border:1px solid rgba(0,0,0,.06); }
+
+/* === FILTER SIDEBAR === */
+.filter-card{
+  background:#fff; border:1px solid rgba(0,0,0,.06);
+  border-radius:1rem; box-shadow:0 4px 14px rgba(0,0,0,.05);
+}
+.sticky{ position:sticky; top:1rem; }
+
+/* === KPIs === */
+.kpi{
+  background:#fff; border:1px solid rgba(0,0,0,.06);
+  border-radius:1rem; padding:1.1rem; text-align:center;
+  box-shadow:0 6px 18px rgba(0,0,0,.05);
+}
+.kpi .value{ font-size:2rem; font-weight:700; }
+.kpi .label{ color:var(--muted); }
+
+/* === CTA === */
+.cta{
+  background:linear-gradient(90deg, rgba(13,110,253,.08), rgba(108,99,255,.08));
+  border:1px solid rgba(13,110,253,.15); border-radius:1.2rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* === FOOTER === */
+footer{ background:#fff; border-top:1px solid rgba(0,0,0,.06); }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
+/* === UTILS === */
+.link-muted{ color:var(--muted); }
+.object-fit-cover{ object-fit:cover; }           /* встречается на картинках */
+.ratio img{ width:100%; height:100%; }           /* на всякий случай */
+.small-muted{ color:#6c757d; font-size:.875rem;} /* мелкий серый текст */
