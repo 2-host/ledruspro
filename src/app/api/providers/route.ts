@@ -3,10 +3,28 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { promises as fs } from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import { cookies } from 'next/headers';
 import { verifyEditToken } from '@/lib/magic'; // <— важно
 
 export const runtime = 'nodejs';
+
+// --- добавить эту функцию ---
+async function saveFile(file: File, folder = 'misc'): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const buffer = Buffer.from(arrayBuffer);
+
+  const original = file.name || 'upload.bin';
+  const ext = path.extname(original) || '.bin';
+  const name = crypto.randomBytes(8).toString('hex') + ext.toLowerCase();
+
+  const dir = path.join(process.cwd(), 'public', 'uploads', folder);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, name), buffer);
+
+  // публичный URL
+  return `/uploads/${folder}/${name}`;
+}
 
 function slugify(input: string) {
   const map: Record<string, string> = {
@@ -19,9 +37,10 @@ function slugify(input: string) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
 }
+
 export async function POST(req: Request) {
   try {
-    // 1) Авторизация — читаем email из edit_token
+    // 1) Авторизация — email берём из edit_token
     const c = await cookies();
     const edit = c.get('edit_token')?.value;
     if (!edit) {
@@ -31,22 +50,22 @@ export async function POST(req: Request) {
     let ownerEmail = '';
     try {
       const payload = await verifyEditToken(edit); // { email, pid? ... }
-      ownerEmail = payload.email;
+      ownerEmail = String(payload.email).toLowerCase().trim();
     } catch {
       return NextResponse.json({ error: 'Сессия недействительна' }, { status: 401 });
     }
 
-    // 2) Читаем форму (как у тебя было)
+    // 2) Читаем форму
     const form = await req.formData();
 
     const name = String(form.get('name') || '').trim();
     if (!name) return NextResponse.json({ error: 'name is required' }, { status: 400 });
 
     const type = String(form.get('type') || 'company');
-    const city = String(form.get('city') || '').trim() || null;
-    const about = String(form.get('about') || '').trim() || null;
-    const phone = String(form.get('phone') || '').trim() || null;
-    const website = String(form.get('website') || '').trim() || null;
+    const city = (String(form.get('city') || '').trim() || null);
+    const about = (String(form.get('about') || '').trim() || null);
+    const phone = (String(form.get('phone') || '').trim() || null);
+    const website = (String(form.get('website') || '').trim() || null);
 
     let experienceYears: number | null = null;
     const expRaw = form.get('experienceYears');
@@ -56,8 +75,9 @@ export async function POST(req: Request) {
     }
 
     let avatarUrl: string | null = null;
-    const avatar = form.get('avatar') as File | null;
-    if (avatar && (avatar as any).size > 0) {
+    const avatar = form.get('avatar');
+    if (avatar instanceof File && avatar.size > 0) {
+      // при желании можно проверить тип: if (!avatar.type.startsWith('image/')) ...
       avatarUrl = await saveFile(avatar, 'avatar');
     }
 
@@ -87,7 +107,7 @@ export async function POST(req: Request) {
       slug = `${slug}-${Math.random().toString(36).slice(2, 6)}`;
     }
 
-    // 3) Создаём провайдера — ownerEmail берём из токена
+    // 3) Создаём провайдера
     const created = await prisma.provider.create({
       data: {
         name,
@@ -98,7 +118,7 @@ export async function POST(req: Request) {
         phone,
         website,
         avatarUrl,
-        ownerEmail, // ← отсюда!
+        ownerEmail,
         experienceYears: experienceYears ?? undefined,
         isVerified: false,
         services: services.length
@@ -122,7 +142,7 @@ export async function POST(req: Request) {
     const images: { imageUrl: string; title?: string }[] = [];
     for (let i = 0; i < portfolioFiles.length; i++) {
       const f = portfolioFiles[i];
-      if (f && (f as any).size > 0) {
+      if (f instanceof File && f.size > 0) {
         const url = await saveFile(f, 'portfolio');
         images.push({ imageUrl: url, title: portfolioTitles[i] || `Проект #${i+1}` });
       }

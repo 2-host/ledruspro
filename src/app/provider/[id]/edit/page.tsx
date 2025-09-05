@@ -1,59 +1,82 @@
 // src/app/provider/[id]/edit/page.tsx
 import { prisma } from '@/lib/prisma';
-import { cookies } from 'next/headers';
-import { verifyEditToken } from '@/lib/magic';
 import ProviderEditForm from '@/components/ProviderEditForm';
 import { notFound, redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
+import { verifyEditToken, signEditToken } from '@/lib/magic';
 
-type Props = {
-  params: Promise<{ id: string }>; // << важно: Promise
-};
+type Props = { params: Promise<{ id: string }> };
+
+// Имена кук: поправьте при необходимости
+const COOKIE_TOKEN = 'edit_token';
+const COOKIE_EMAIL = 'email'; // если у вас другая — замените, напр. 'user_email'
 
 export default async function EditProviderPage({ params }: Props) {
-  // Next 15: params нужно await-ить
   const { id: idStr } = await params;
-
-  // если сегмент не число — 404
   if (!/^\d+$/.test(idStr)) return notFound();
   const id = Number(idStr);
 
-  // Next 15: cookies() тоже нужно await-ить
+  // --- читаем куки
   const c = await cookies();
-  const token = c.get('edit_token')?.value;
+  const token = c.get(COOKIE_TOKEN)?.value || null;
+  const emailCookie = c.get(COOKIE_EMAIL)?.value?.toLowerCase().trim() || null;
 
   if (!token) {
-    // нет сессии редактирования — отправим на вход с возвратом назад
     redirect(`/?login=required&return=/provider/${id}/edit`);
   }
 
-  // проверяем JWT из cookie
-  let ok = false;
+  // --- валидируем токен (несёт email и pid)
+  let payloadEmail: string | null = null;
+  let payloadPid: number | null = null;
   try {
-    const payload = await verifyEditToken(token);
-    ok = payload?.pid === id;
+    const payload = await verifyEditToken(token!);
+    payloadEmail =
+      (payload?.email && String(payload.email).toLowerCase().trim()) || null;
+    payloadPid = typeof payload?.pid === 'number' ? payload.pid : null;
   } catch {
-    ok = false;
+    redirect(`/?login=required&return=/provider/${id}/edit`);
   }
 
-  if (!ok) {
-    // токен невалиден или для другого профиля
+  // email сессии берём из токена, если есть; иначе — из отдельной куки
+  const sessionEmail = (payloadEmail || emailCookie || '').toLowerCase().trim();
+  if (!sessionEmail) {
+    redirect(`/?login=required&return=/provider/${id}/edit`);
+  }
+
+  // --- грузим провайдера
+  const p = await prisma.provider.findUnique({
+    where: { id },
+    include: {
+      services: true,
+      categories: { include: { category: true } },
+      projects: true,
+    },
+  });
+  if (!p) return notFound();
+
+  // --- проверяем право: владелец = email из токена
+  const owner = (p.ownerEmail || '').toLowerCase().trim();
+  if (!owner || owner !== sessionEmail) {
     redirect('/provider/select');
   }
 
-  // грузим данные для формы
-  const [p, cats] = await Promise.all([
-    prisma.provider.findUnique({
-      where: { id },
-      include: {
-        services: true,
-        categories: { include: { category: true } },
-        projects: true,
-      },
-    }),
-    prisma.category.findMany({ orderBy: { name: 'asc' } }),
-  ]);
+  // --- опционально: если токен выписан под другой pid, перевыпишем под текущий
+  if (payloadPid !== id) {
+    try {
+      const newToken = await signEditToken(sessionEmail, id);
+      c.set(COOKIE_TOKEN, newToken, {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        path: '/',
+        maxAge: 60 * 60, // 1 час
+      });
+    } catch {
+      // молча игнорируем — это не критично для рендера
+    }
+  }
 
-  if (!p) return notFound();
+  const cats = await prisma.category.findMany({ orderBy: { name: 'asc' } });
 
   return (
     <div className="container py-4">
