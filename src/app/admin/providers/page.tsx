@@ -9,22 +9,41 @@ function toInt(v: string | string[] | undefined, d: number) {
   return Number.isFinite(n) ? n : d;
 }
 
-export default async function AdminProvidersPage({ searchParams }: { searchParams?: Record<string, string | string[]> }) {
-  const q = (searchParams?.q as string)?.trim() || '';
-  const page = Math.max(1, toInt(searchParams?.page, 1));
+export default async function AdminProvidersPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[]>>;
+}) {
+  // ⬇️ обязательно await
+  const sp = await searchParams;
+
+  const qRaw = Array.isArray(sp.q) ? sp.q[0] : sp.q;
+  const q = (qRaw ?? '').trim();
+
+  const pageRaw = Array.isArray(sp.page) ? sp.page[0] : sp.page;
+  const page = Math.max(1, toInt(pageRaw, 1));
+
   const take = 50;
   const skip = (page - 1) * take;
 
-  const where = q ? {
-    OR: [
-      { name: { contains: q, mode: 'insensitive' } },
-      { city: { contains: q, mode: 'insensitive' } },
-      { slug: { contains: q } },
-    ],
-  } : {};
+  const where = q
+    ? {
+        OR: [
+          { name: { contains: q, mode: 'insensitive' } },
+          { city: { contains: q, mode: 'insensitive' } },
+          { slug: { contains: q } },
+        ],
+      }
+    : {};
 
   const [items, total] = await Promise.all([
-    prisma.provider.findMany({ where, orderBy: { id: 'desc' }, skip, take, include: { categories: { include: { category: true } } } }),
+    prisma.provider.findMany({
+      where,
+      orderBy: { id: 'desc' },
+      skip,
+      take,
+      include: { categories: { include: { category: true } } },
+    }),
     prisma.provider.count({ where }),
   ]);
 
@@ -35,8 +54,16 @@ export default async function AdminProvidersPage({ searchParams }: { searchParam
       <div className="d-flex align-items-center justify-content-between mb-3">
         <h1 className="h3 m-0">Исполнители</h1>
         <form className="d-flex" action="/admin/providers" method="get">
-          <input name="q" defaultValue={q} className="form-control me-2" placeholder="Поиск: имя, город, slug" />
-          <button className="btn btn-primary" type="submit"><i className="bi bi-search me-1"/>Искать</button>
+          <input
+            name="q"
+            defaultValue={q}
+            className="form-control me-2"
+            placeholder="Поиск: имя, город, slug"
+          />
+          <button className="btn btn-primary" type="submit">
+            <i className="bi bi-search me-1" />
+            Искать
+          </button>
         </form>
       </div>
 
@@ -55,19 +82,26 @@ export default async function AdminProvidersPage({ searchParams }: { searchParam
             </tr>
           </thead>
           <tbody>
-            {items.map(p => (
+            {items.map((p) => (
               <tr key={p.id}>
                 <td>{p.id}</td>
-                <td><Link href={`/admin/providers/${p.id}/edit`}>{p.name}</Link></td>
-                <td className="text-nowrap text-truncate" style={{maxWidth: 220}}>
-                  {p.categories.map(pc => pc.category.name).join(', ') || '—'}
+                <td>
+                  <Link href={`/admin/providers/${p.id}/edit`}>{p.name}</Link>
+                </td>
+                <td className="text-nowrap text-truncate" style={{ maxWidth: 220 }}>
+                  {p.categories.map((pc) => pc.category.name).join(', ') || '—'}
                 </td>
                 <td>{p.city || '—'}</td>
                 <td>{p.phone || '—'}</td>
                 <td>{p.priceFrom ?? '—'}</td>
                 <td>{p.isVerified ? '✅' : '—'}</td>
                 <td className="text-end">
-                  <Link href={`/admin/providers/${p.id}/edit`} className="btn btn-sm btn-outline-secondary me-2"><i className="bi bi-pencil"/> Edit</Link>
+                  <Link
+                    href={`/admin/providers/${p.id}/edit`}
+                    className="btn btn-sm btn-outline-secondary me-2"
+                  >
+                    <i className="bi bi-pencil" /> Edit
+                  </Link>
                   <DeleteButton id={p.id} />
                 </td>
               </tr>
@@ -80,7 +114,12 @@ export default async function AdminProvidersPage({ searchParams }: { searchParam
         <ul className="pagination">
           {Array.from({ length: pages }).map((_, i) => (
             <li key={i} className={`page-item ${i + 1 === page ? 'active' : ''}`}>
-              <Link className="page-link" href={`/admin/providers?page=${i + 1}&q=${encodeURIComponent(q)}`}>{i + 1}</Link>
+              <Link
+                className="page-link"
+                href={`/admin/providers?page=${i + 1}&q=${encodeURIComponent(q)}`}
+              >
+                {i + 1}
+              </Link>
             </li>
           ))}
         </ul>
