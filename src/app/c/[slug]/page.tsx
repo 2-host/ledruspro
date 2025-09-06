@@ -1,5 +1,6 @@
 // src/app/c/[slug]/page.tsx
 import { prisma } from '@/lib/prisma';
+import type { Metadata } from 'next';
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -60,7 +61,6 @@ function buildHref(
   if (sp.view || overrides.view) params.set('view', (overrides.view || sp.view) as string);
   if (overrides.page && overrides.page > 1) params.set('page', String(overrides.page));
   else if (sp.page && (!overrides.page || overrides.page === Number(sp.page))) {
-    // сохраняем текущую страницу, но не пишем ?page=1
     const p = Number.parseInt(sp.page, 10);
     if (!Number.isNaN(p) && p > 1) params.set('page', String(p));
   }
@@ -88,29 +88,59 @@ function makePages(current: number, total: number): (number | 'dots')[] {
   return withDots;
 }
 
+/** ====== ВАЖНО: generateMetadata на верхнем уровне модуля ====== */
+export async function generateMetadata(
+  { params }: { params: Promise<{ slug: string }> }
+): Promise<Metadata> {
+  const { slug: rawSlug } = await params;
+
+  let decoded = rawSlug;
+  try { decoded = decodeURIComponent(rawSlug); } catch {}
+
+  const isLatin = /^[a-z0-9-]+$/i.test(decoded);
+  const latinCandidate = isLatin ? decoded.toLowerCase() : slugify(decoded);
+  const isAll = latinCandidate === 'all' || decoded.toLowerCase() === 'all';
+
+  if (isAll) {
+    return {
+      title: 'Все исполнители',
+      description: 'Каталог проверенных исполнителей по всем категориям.',
+      keywords: 'исполнители, каталог, услуги',
+    };
+  }
+
+  const cat = await prisma.category.findFirst({
+    where: { OR: [{ slug: latinCandidate }, { name: decoded }] },
+    select: { name: true, seoTitle: true, seoDescription: true, seoKeywords: true },
+  });
+
+  const fallbackTitle = cat?.name ?? decoded;
+
+  return {
+    title: cat?.seoTitle || fallbackTitle,
+    description:
+      cat?.seoDescription ||
+      `Исполнители категории «${fallbackTitle}». Сравните портфолио, цены и отзывы.`,
+    keywords: cat?.seoKeywords || undefined,
+  };
+}
+
+/** ====== Страница категории ====== */
 export default async function CategoryPage({ params, searchParams }: PageProps) {
   const { slug: rawSlug } = await params;
   const sp = await searchParams;
 
-  // поддержка кириллицы в URL
   let decoded = rawSlug;
-  try {
-    decoded = decodeURIComponent(rawSlug);
-  } catch {
-    // оставляем как есть, если не декодится
-  }
+  try { decoded = decodeURIComponent(rawSlug); } catch {}
 
-  // если латиница — берем как есть; если кириллица — получаем латинский кандидат
   const isLatin = /^[a-z0-9-]+$/i.test(decoded);
   const latinCandidate = isLatin ? decoded.toLowerCase() : slugify(decoded);
-
-  // "all" — показываем всех
   const isAll = latinCandidate === 'all' || decoded.toLowerCase() === 'all';
 
-  // ищем категорию: по slug (латиницей) ИЛИ по имени (кириллица)
   const cat = !isAll
     ? await prisma.category.findFirst({
         where: { OR: [{ slug: latinCandidate }, { name: decoded }] },
+        select: { id: true, name: true, seoH1: true },
       })
     : null;
 
@@ -120,17 +150,12 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
 
   // формируем where
   const whereAND: any[] = [];
-  if (cat) {
-    whereAND.push({ categories: { some: { categoryId: cat.id } } });
-  }
+  if (cat) whereAND.push({ categories: { some: { categoryId: cat.id } } });
   if (sp.city) whereAND.push({ city: { contains: sp.city } });
   if (rating) whereAND.push({ rating: { gte: rating } });
   if (sp.q) {
     whereAND.push({
-      OR: [
-        { name: { contains: sp.q } },
-        { title: { contains: sp.q } },
-      ],
+      OR: [{ name: { contains: sp.q } }, { title: { contains: sp.q } }],
     });
   }
   if (passport) whereAND.push({ passportVerified: true });
@@ -153,8 +178,9 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
   ]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PER_PAGE));
-  const currentPage = Math.min(page, totalPages); // чтобы не вывалиться за пределы
+  const currentPage = Math.min(page, totalPages);
   const title = isAll ? 'Все исполнители' : (cat?.name ?? decoded);
+  const h1 = isAll ? 'Все исполнители' : (cat?.seoH1 || title);
 
   // текущий вид (по умолчанию LIST)
   const view: 'grid' | 'list' = sp.view === 'grid' || sp.view === 'list' ? sp.view : 'list';
@@ -184,7 +210,7 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
 
           <div className="row align-items-center g-3">
             <div className="col-lg-8">
-              <h1 className="h2 fw-bold mb-1">{title}</h1>
+              <h1 className="h2 fw-bold mb-1">{h1}</h1>
               <p className="text-secondary mb-0">
                 Сравните портфолио, цены и отзывы — свяжитесь напрямую с подходящим исполнителем.
               </p>
@@ -231,7 +257,6 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                     />
                   </div>
 
-                  {/* Новые чекбоксы */}
                   <div className="mb-2 form-check">
                     <input
                       className="form-check-input"
@@ -265,7 +290,6 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                       <i className="bi bi-funnel me-1" />
                       Применить
                     </button>
-                    {/* сброс только query-параметров */}
                     <a href={`/c/${rawSlug}`} className="btn btn-outline-secondary btn-sm">
                       <i className="bi bi-arrow-repeat me-1" />
                       Сбросить
@@ -349,11 +373,11 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                               )}
                             </div>
                             {/* Описание (до 500 символов) */}
-{p.about && (
-  <div className="small text-muted mt-2">
-    {truncateText(p.about, 500)}
-  </div>
-)}
+                            {p.about && (
+                              <div className="small text-muted mt-2">
+                                {truncateText(p.about, 500)}
+                              </div>
+                            )}
                           </div>
                           <span className="ms-auto badge badge-soft">
                             {p.title || 'Услуги'}
@@ -383,9 +407,7 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                             <li key={s.id}>
                               <i className="bi bi-check2-circle me-2 text-success" />
                               {s.name}
-                              {s.priceFrom
-                                ? ` — от ${s.priceFrom.toLocaleString('ru-RU')} ₽`
-                                : ''}
+                              {s.priceFrom ? ` — от ${s.priceFrom.toLocaleString('ru-RU')} ₽` : ''}
                             </li>
                           ))}
                         </ul>
@@ -440,7 +462,6 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                                   </>
                                 )}
                               </div>
-                              {/* Бейджи статусов */}
                               <div className="d-flex align-items-center gap-2 flex-wrap mt-2">
                                 {p.passportVerified && (
                                   <span className="badge bg-success-subtle text-success border">
@@ -464,25 +485,23 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                               </button>
                             </div>
                           </div>
-                                   {/* Описание (до 500 символов) */}
-                                {p.about && (
-                                  <div className="small text-muted mt-2">
-                                    {truncateText(p.about, 500)}
-                                  </div>
-                                )}
+
+                          {p.about && (
+                            <div className="small text-muted mt-2">
+                              {truncateText(p.about, 500)}
+                            </div>
+                          )}
+
                           <ul className="list-unstyled small text-secondary mt-3 mb-0">
                             {(p.services || []).slice(0, 4).map((s) => (
                               <li key={s.id} className="mb-1">
                                 <i className="bi bi-check2-circle me-2 text-success" />
                                 {s.name}
-                                {s.priceFrom
-                                  ? ` — от ${s.priceFrom.toLocaleString('ru-RU')} ₽`
-                                  : ''}
+                                {s.priceFrom ? ` — от ${s.priceFrom.toLocaleString('ru-RU')} ₽` : ''}
                               </li>
                             ))}
                           </ul>
 
-                          {/* Actions for mobile */}
                           <div className="d-md-none d-flex align-items-center gap-2 mt-3">
                             <a href={`/provider/${p.id}`} className="btn btn-primary flex-grow-1">
                               Смотреть профиль
@@ -508,7 +527,6 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
               {totalPages > 1 && (
                 <nav className="mt-4" aria-label="Навигация по страницам">
                   <ul className="pagination justify-content-center">
-                    {/* Prev */}
                     <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
                       <a className="page-link" href={buildHref(rawSlug, sp, { page: currentPage - 1 })} aria-label="Назад">
                         Назад
@@ -527,7 +545,6 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                       )
                     )}
 
-                    {/* Next */}
                     <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
                       <a className="page-link" href={buildHref(rawSlug, sp, { page: currentPage + 1 })} aria-label="Вперёд">
                         Вперёд

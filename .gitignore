@@ -25,3 +25,10 @@ prisma/*.db-journal
 
 # Если используете PM2, pnpm store и пр.
 .pnpm-store/
+
+# User uploads
+public/uploads/
+
+# uploads
+public/uploads/
+

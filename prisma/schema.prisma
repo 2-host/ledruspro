@@ -12,6 +12,10 @@ model Category {
   id    Int       @id @default(autoincrement())
   name  String
   slug  String    @unique
+  seoTitle       String?
+  seoDescription String?
+  seoKeywords    String?
+  seoH1          String?
   // связи
   ProviderCategory ProviderCategory[]
 }

@@ -22,7 +22,7 @@ function normalizeUploadPath(p?: string | null) {
   if (!p) return null;
   try {
     const url = new URL(p, 'http://local');
-    return url.pathname;
+    return url.pathname; // отрежем домен, если пришёл абсолютный URL
   } catch {
     return p;
   }
@@ -32,14 +32,17 @@ async function saveFile(file: File, prefix: string) {
   const buf = Buffer.from(await file.arrayBuffer());
   const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
   await fs.mkdir(uploadsDir, { recursive: true });
-  const ext = (file.type?.split('/')[1]) ? '.' + file.type.split('/')[1] : path.extname((file as any).name || '') || '.jpg';
+  const ext =
+    (file.type?.split('/')[1] ? '.' + file.type.split('/')[1] : path.extname((file as any).name || '')) ||
+    '.jpg';
   const name = `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}${ext}`;
   await fs.writeFile(path.join(uploadsDir, name), buf);
   return `/uploads/${name}`;
 }
 
-export async function GET(_req: Request, { params }: { params: { id: string } }) {
-  const id = Number(params.id);
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (!Number.isFinite(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
   const provider = await prisma.provider.findUnique({
@@ -55,36 +58,88 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
   return NextResponse.json(provider);
 }
 
-export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const id = Number(params.id);
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (!Number.isFinite(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
   const ct = req.headers.get('content-type') || '';
 
-  // Вариант 1: быстрый JSON-патч
+  // === JSON PATCH (админ-форма) ===
   if (ct.includes('application/json')) {
     const body = await req.json();
+
+    const toNum = (v: any) => (v === '' || v == null ? null : Number(v));
+    const toInt = (v: any) => (v === '' || v == null ? null : Math.trunc(Number(v)));
+    const toBool = (v: any) => v === true || v === 'true' || v === '1' || v === 1 || v === 'on';
+
     const allowed = [
-      'name','title','city','priceFrom','rating','website','phone','about','avatarUrl',
-      'isVerified','slug','passportVerified','worksByContract','experienceYears'
+      'name','slug','title','city','priceFrom','rating','reviewsCount','isVerified',
+      'passportVerified','worksByContract','experienceYears','ownerEmail','website',
+      'phone','about','avatarUrl'
     ] as const;
+
     const data: any = {};
-    for (const k of allowed) if (k in body) data[k] = body[k];
-
-    if (typeof data.name === 'string' && !data.slug) data.slug = slugify(data.name);
-    if (typeof data.avatarUrl === 'string') data.avatarUrl = normalizeUploadPath(data.avatarUrl);
-
-    try {
-      const updated = await prisma.provider.update({ where: { id }, data });
-      return NextResponse.json(updated);
-    } catch (e: any) {
-      return NextResponse.json({ error: e?.message || 'Update failed' }, { status: 500 });
+    for (const k of allowed) {
+      if (k in body) data[k] = (body as any)[k];
     }
+
+    // Приведение типов и нормализация
+    if ('priceFrom' in data) data.priceFrom = toInt(data.priceFrom);
+    if ('rating' in data) data.rating = toNum(data.rating);
+    if ('reviewsCount' in data) {
+      const n = toInt(data.reviewsCount);
+      data.reviewsCount = n == null ? null : Math.max(0, n);
+    }
+    if ('experienceYears' in data) {
+      const n = toInt(data.experienceYears);
+      data.experienceYears = n == null ? null : Math.max(0, Math.min(60, n));
+    }
+    if ('isVerified' in data) data.isVerified = toBool(data.isVerified);
+    if ('passportVerified' in data) data.passportVerified = toBool(data.passportVerified);
+    if ('worksByContract' in data) data.worksByContract = toBool(data.worksByContract);
+
+    if (typeof data.name === 'string' && (!data.slug || data.slug === '')) {
+      data.slug = slugify(data.name);
+    }
+    if (typeof data.avatarUrl === 'string') data.avatarUrl = normalizeUploadPath(data.avatarUrl);
+    if (typeof data.ownerEmail === 'string') {
+      const trimmed = data.ownerEmail.trim();
+      data.ownerEmail = trimmed === '' ? null : trimmed.toLowerCase();
+    }
+    if (typeof data.website === 'string') data.website = data.website.trim() || null;
+    if (typeof data.phone === 'string') data.phone = data.phone.trim() || null;
+    if (typeof data.city === 'string') data.city = data.city.trim() || null;
+    if (typeof data.title === 'string') data.title = data.title.trim() || null;
+    if (typeof data.about === 'string') data.about = data.about.trim() || null;
+
+    // Обновление основных полей
+    await prisma.provider.update({ where: { id }, data });
+
+    // Категории (полная замена, если пришли)
+    if (Array.isArray((body as any).categoryIds)) {
+      const categoryIds = ((body as any).categoryIds as any[])
+        .map(Number)
+        .filter((n) => Number.isFinite(n)) as number[];
+
+      await prisma.providerCategory.deleteMany({ where: { providerId: id } });
+      if (categoryIds.length) {
+        await prisma.providerCategory.createMany({
+          data: categoryIds.map((categoryId) => ({ providerId: id, categoryId })),
+        });
+      }
+    }
+
+    const updated = await prisma.provider.findUnique({
+      where: { id },
+      include: { categories: { include: { category: true } } },
+    });
+
+    return NextResponse.json(updated);
   }
 
-  // Вариант 2: Полное редактирование (multipart/form-data)
+  // === multipart/form-data (само-редактирование по edit_token) ===
   if (ct.includes('multipart/form-data')) {
-    // защита: нужен edit_token
     const token = cookies().get('edit_token')?.value;
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     try {
@@ -112,19 +167,16 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       const passportVerified = String(form.get('passportVerified') || '0') === '1';
       const worksByContract  = String(form.get('worksByContract')  || '0') === '1';
 
-      // аватар
       let avatarUrl: string | undefined;
       const avatar = form.get('avatar') as File | null;
       if (avatar && (avatar as any).size > 0) {
         avatarUrl = await saveFile(avatar, 'avatar');
       }
 
-      // категории
       const categoryIds = form.getAll('categories')
         .map(v => Number(v))
         .filter(n => Number.isFinite(n)) as number[];
 
-      // услуги
       let services: Array<{ name: string; priceFrom?: number|null; unit?: string|null; description?: string|null }> = [];
       const servicesJson = form.get('services');
       if (typeof servicesJson === 'string' && servicesJson.trim()) {
@@ -134,7 +186,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         } catch {}
       }
 
-      // существующие проекты
       let existingProjects: Array<{ id: number; title?: string; _delete?: boolean }> = [];
       const existingJson = form.get('existingProjects');
       if (typeof existingJson === 'string' && existingJson.trim()) {
@@ -144,7 +195,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         } catch {}
       }
 
-      // новые проекты
       const portfolioFiles = form.getAll('portfolioFiles') as File[];
       const portfolioTitles: string[] = [];
       for (let i = 0; i < portfolioFiles.length; i++) {
@@ -152,7 +202,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         portfolioTitles.push(typeof t === 'string' ? t : '');
       }
 
-      // 1) профиль
       const patch: any = {
         name,
         title: type === 'company' ? 'Студия / Компания' : 'Частный специалист',
@@ -165,7 +214,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
       await prisma.provider.update({ where: { id }, data: patch });
 
-      // 2) услуги (пересборка)
+      // Услуги — пересборка
       await prisma.service.deleteMany({ where: { providerId: id } });
       if (services.length) {
         await prisma.service.createMany({
@@ -179,7 +228,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         });
       }
 
-      // 3) категории (пересборка)
+      // Категории — пересборка
       await prisma.providerCategory.deleteMany({ where: { providerId: id } });
       if (categoryIds.length) {
         await prisma.providerCategory.createMany({
@@ -187,18 +236,16 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
         });
       }
 
-      // 4) проекты: удалить/обновить/добавить
+      // Проекты
       const toDeleteIds = existingProjects.filter(p => p._delete).map(p => p.id);
       if (toDeleteIds.length) {
         await prisma.project.deleteMany({ where: { providerId: id, id: { in: toDeleteIds } } });
       }
       const toUpdate = existingProjects.filter(p => !p._delete && typeof p.title === 'string');
       for (const u of toUpdate) {
-        await prisma.project.update({
-          where: { id: u.id },
-          data: { title: u.title || null },
-        });
+        await prisma.project.update({ where: { id: u.id }, data: { title: u.title || null } });
       }
+
       const newImgs: { imageUrl: string; title?: string }[] = [];
       for (let i = 0; i < portfolioFiles.length; i++) {
         const f = portfolioFiles[i];
@@ -209,11 +256,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       }
       if (newImgs.length) {
         await prisma.project.createMany({
-          data: newImgs.map(img => ({
-            providerId: id,
-            imageUrl: img.imageUrl,
-            title: img.title,
-          })),
+          data: newImgs.map(img => ({ providerId: id, imageUrl: img.imageUrl, title: img.title })),
         });
       }
 
@@ -227,8 +270,9 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   return NextResponse.json({ error: 'Unsupported content-type' }, { status: 400 });
 }
 
-export async function DELETE(_req: Request, { params }: { params: { id: string } }) {
-  const id = Number(params.id);
+export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id: idStr } = await params;
+  const id = Number(idStr);
   if (!Number.isFinite(id)) return NextResponse.json({ error: 'Invalid id' }, { status: 400 });
 
   const provider = await prisma.provider.findUnique({
