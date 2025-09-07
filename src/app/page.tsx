@@ -1,5 +1,6 @@
 // src/app/page.tsx
 import { prisma } from '@/lib/prisma';
+import FavoriteButton from '@/components/FavoriteButton';
 
 export default async function HomePage() {
   // Данные из БД
@@ -10,9 +11,18 @@ export default async function HomePage() {
 
   const topProviders = await prisma.provider.findMany({
     orderBy: { rating: 'desc' },
-    take: 3,
+    take: 6,
     include: { services: true, projects: true },
   });
+
+  function truncateText(s?: string | null, max = 500) {
+  if (!s) return '';
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + '…';
+}
+
 
   return (
     <>
@@ -122,83 +132,99 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* FEATURED PROVIDERS */}
-      <section id="providers" className="py-5">
-        <div className="container">
-          <div className="d-flex align-items-end justify-content-between mb-4">
-            <div>
-              <h2 className="h3 mb-1">Топ-исполнители рядом с вами</h2>
-              <small className="text-secondary">По рейтингу и отзывам</small>
-            </div>
-            <a href="/c/all" className="btn btn-outline-primary btn-sm">
-              Смотреть всех <i className="bi bi-chevron-right" />
-            </a>
-          </div>
+      {/* FEATURED PROVIDERS (как в каталоге grid) */}
+<section id="providers" className="py-5">
+  <div className="container">
+    <div className="d-flex align-items-end justify-content-between mb-4">
+      <div>
+        <h2 className="h3 mb-1">Топ-исполнители рядом с вами</h2>
+        <small className="text-secondary">По рейтингу и отзывам</small>
+      </div>
+      <a href="/c/all" className="btn btn-outline-primary btn-sm">
+        Смотреть всех <i className="bi bi-chevron-right" />
+      </a>
+    </div>
 
-          <div className="row g-4">
-            {topProviders.map((p) => (
-              <div className="col-md-6 col-lg-4" key={p.id}>
-                <div className="card-modern h-100 p-3">
-                  <div className="d-flex align-items-center mb-3">
-                    <img
-  className="avatar me-3"
-  src={p.avatarUrl || p.projects?.[0]?.imageUrl || 'https://picsum.photos/140'}
-  alt={p.name}
-/>
-                    <div>
-                      <div className="fw-semibold">{p.name}</div>
-                      <div className="small text-secondary">
-                        <i className="bi bi-geo-alt me-1" />
-                        {p.city || '—'}
-                      </div>
-                    </div>
-                   <span className="ms-auto badge badge-soft">
-  {p.title || 'Услуги'}
-</span>
-                  </div>
-
-                  <div className="rating mb-2">
-                    {[1, 2, 3, 4, 5].map((i) => (
-                      <i
-                        key={i}
-                        className={`bi ${
-                          (p.rating || 0) >= i
-                            ? 'bi-star-fill'
-                            : (p.rating || 0) >= i - 0.5
-                            ? 'bi-star-half'
-                            : 'bi-star'
-                        }`}
-                      />
-                    ))}
-                    <span className="small text-secondary ms-1">
-                      {(p.rating || 0).toFixed(1)} ({p.reviewsCount || 0})
-                    </span>
-                  </div>
-
-                  <ul className="list-unstyled small text-secondary mb-3">
-                    {(p.services || []).slice(0, 3).map((s, idx) => (
-                      <li key={idx}>
-                        <i className="bi bi-check2-circle me-2 text-success" />
-                        {s.name}
-                        {s.priceFrom ? ` от ${s.priceFrom.toLocaleString('ru-RU')} ₽` : ''}
-                      </li>
-                    ))}
-                  </ul>
-
-                  <div className="d-flex align-items-center gap-2">
-                    <a href={`/provider/${p.id}`} className="btn btn-primary flex-grow-1">
-                      Смотреть профиль
-                    </a>
-                    <button className="btn btn-outline-secondary">
-                      <i className="bi bi-heart" />
-                    </button>
-                  </div>
+    <div className="row g-4">
+      {topProviders.map((p) => (
+        <div className="col-md-6" key={p.id}>
+          <div className="card-modern p-3 h-100">
+            <div className="d-flex align-items-center mb-3">
+              <img
+                className="avatar me-3"
+                src={
+                  p.avatarUrl ||
+                  p.projects?.[0]?.imageUrl ||
+                  `https://picsum.photos/seed/ava${p.id}/140`
+                }
+                alt={p.name}
+              />
+              <div>
+                <div className="fw-semibold">{p.name}</div>
+                <div className="small text-secondary">
+                  <i className="bi bi-geo-alt me-1" />
+                  {p.city || '—'}
+                  {p.services.length > 0 && (
+                    <>
+                      {' '}• от{' '}
+                      {p.services[0].priceFrom
+                        ? p.services[0].priceFrom.toLocaleString('ru-RU')
+                        : '—'}{' '}
+                      ₽
+                    </>
+                  )}
                 </div>
+                {/* Бейджи статусов */}
+                <div className="d-flex align-items-center gap-2 flex-wrap mt-1">
+                  {p.passportVerified && (
+                    <span className="badge bg-success-subtle text-success border">
+                      <i className="bi bi-shield-check me-1" /> Паспорт проверен
+                    </span>
+                  )}
+                  {p.worksByContract && (
+                    <span className="badge bg-primary-subtle text-primary border">
+                      <i className="bi bi-file-earmark-text me-1" /> По договору
+                    </span>
+                  )}
+                </div>
+                {/* Описание */}
+                {p.about && (
+                  <div className="small text-muted mt-2">
+                    {truncateText(p.about, 500)}
+                  </div>
+                )}
               </div>
-            ))}
+            </div>
+
+
+            <ul className="list-unstyled small text-secondary mb-3">
+              {(p.services || []).slice(0, 3).map((s) => (
+                <li key={s.id}>
+                  <i className="bi bi-check2-circle me-2 text-success" />
+                  {s.name}
+                  {s.priceFrom ? ` — от ${s.priceFrom.toLocaleString('ru-RU')} ₽` : ''}
+                </li>
+              ))}
+            </ul>
+
+            <div className="d-flex align-items-center gap-2">
+              <a href={`/provider/${p.id}`} className="btn btn-primary flex-grow-1">
+                Смотреть профиль
+              </a>
+              <FavoriteButton provider={{
+  id: p.id,
+  name: p.name,
+  avatarUrl: p.avatarUrl,
+  city: p.city,
+}} />
+            </div>
           </div>
         </div>
-      </section>
+      ))}
+    </div>
+  </div>
+</section>
+
 
 {/* HOW IT WORKS + CTA (из макета) */}
 <section id="how" className="py-5">

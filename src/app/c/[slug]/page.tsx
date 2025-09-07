@@ -1,6 +1,7 @@
 // src/app/c/[slug]/page.tsx
 import { prisma } from '@/lib/prisma';
 import type { Metadata } from 'next';
+import FavoriteButton from '@/components/FavoriteButton';
 
 type PageProps = {
   params: Promise<{ slug: string }>;
@@ -36,7 +37,7 @@ function slugify(input: string) {
     .replace(/^-|-$/g, '');
 }
 
-const PER_PAGE = 5;
+const PER_PAGE = 8;
 
 function truncateText(s: string | null | undefined, max = 500) {
   if (!s) return '';
@@ -149,17 +150,35 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
   const contract = sp.contract === '1' || sp.contract === 'true';
 
   // формируем where
-  const whereAND: any[] = [];
-  if (cat) whereAND.push({ categories: { some: { categoryId: cat.id } } });
-  if (sp.city) whereAND.push({ city: { contains: sp.city } });
-  if (rating) whereAND.push({ rating: { gte: rating } });
-  if (sp.q) {
-    whereAND.push({
-      OR: [{ name: { contains: sp.q } }, { title: { contains: sp.q } }],
-    });
-  }
-  if (passport) whereAND.push({ passportVerified: true });
-  if (contract) whereAND.push({ worksByContract: true });
+const whereAND: any[] = [];
+if (cat) whereAND.push({ categories: { some: { categoryId: cat.id } } });
+if (sp.city) whereAND.push({ city: { contains: sp.city } });
+if (rating) whereAND.push({ rating: { gte: rating } });
+
+if (sp.q) {
+  const q = sp.q.toLowerCase();
+  whereAND.push({
+    OR: [
+      { nameSearch:  { contains: q } },
+      { titleSearch: { contains: q } },
+      {
+        services: {
+          some: {
+            OR: [
+              { nameSearch:        { contains: q } },
+              { descriptionSearch: { contains: q } },
+            ],
+          },
+        },
+      },
+    ],
+  });
+}
+
+
+if (passport) whereAND.push({ passportVerified: true });
+if (contract) whereAND.push({ worksByContract: true });
+
 
   // пагинация
   const pageParam = Number.parseInt(sp.page || '1', 10);
@@ -379,29 +398,8 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                               </div>
                             )}
                           </div>
-                          <span className="ms-auto badge badge-soft">
-                            {p.title || 'Услуги'}
-                          </span>
+                     
                         </div>
-
-                        <div className="rating mb-2">
-                          {[1, 2, 3, 4, 5].map((i) => (
-                            <i
-                              key={i}
-                              className={`bi ${
-                                (p.rating || 0) >= i
-                                  ? 'bi-star-fill'
-                                  : (p.rating || 0) >= i - 0.5
-                                    ? 'bi-star-half'
-                                    : 'bi-star'
-                              }`}
-                            />
-                          ))}
-                          <span className="small text-secondary ms-1">
-                            {(p.rating || 0).toFixed(1)} ({p.reviewsCount || 0})
-                          </span>
-                        </div>
-
                         <ul className="list-unstyled small text-secondary mb-3">
                           {(p.services || []).slice(0, 3).map((s) => (
                             <li key={s.id}>
@@ -416,9 +414,7 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                           <a href={`/provider/${p.id}`} className="btn btn-primary flex-grow-1">
                             Смотреть профиль
                           </a>
-                          <button className="btn btn-outline-secondary" type="button">
-                            <i className="bi bi-heart" />
-                          </button>
+                          <FavoriteButton provider={{ id: p.id, name: p.name, avatarUrl: p.avatarUrl, city: p.city }} />
                         </div>
                       </div>
                     </div>
@@ -480,9 +476,9 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                               <a href={`/provider/${p.id}`} className="btn btn-primary">
                                 Смотреть профиль
                               </a>
-                              <button className="btn btn-outline-secondary" type="button" aria-label="В избранное">
-                                <i className="bi bi-heart" />
-                              </button>
+                               <FavoriteButton
+    provider={{ id: p.id, name: p.name, avatarUrl: p.avatarUrl, city: p.city }}
+  />
                             </div>
                           </div>
 
@@ -506,9 +502,7 @@ export default async function CategoryPage({ params, searchParams }: PageProps) 
                             <a href={`/provider/${p.id}`} className="btn btn-primary flex-grow-1">
                               Смотреть профиль
                             </a>
-                            <button className="btn btn-outline-secondary" type="button" aria-label="В избранное">
-                              <i className="bi bi-heart" />
-                            </button>
+                            <FavoriteButton provider={{ id: p.id, name: p.name, avatarUrl: p.avatarUrl, city: p.city }} />
                           </div>
                         </div>
                       </div>

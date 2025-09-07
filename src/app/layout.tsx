@@ -5,6 +5,7 @@ import { cookies } from 'next/headers';
 import { verifyEditToken } from '@/lib/magic';
 import LoginModal from '@/components/LoginModal';
 import NewProviderNav from '@/components/NewProviderNav';
+import FavoriteNavLink from '@/components/FavoriteNavLink';
 
 export const metadata: Metadata = {
   title: 'LEDRUS PRO',
@@ -45,9 +46,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <div className="collapse navbar-collapse" id="nav">
               <ul className="navbar-nav ms-auto align-items-lg-center">
                 <li className="nav-item me-lg-3">
-                  <a className="nav-link link-muted" href="/c/all">Исполнители</a>
+                  <a className="nav-link link-muted" href="/c/all"><i className="bi bi-people me-1"></i> Исполнители</a>
                 </li>
-
+                 <li className="nav-item me-lg-3">
+    <FavoriteNavLink />
+  </li>
                 {/* если НЕ авторизован */}
                 {!email && (
                   <>
@@ -71,6 +74,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                           <i className="bi bi-pencil-square me-1" /> Создать профиль
                         </a>
                       </li>
+                       <li className="nav-item me-lg-3">
+    <FavoriteNavLink />
+  </li>
                     <li className="nav-item ms-lg-2 mt-2 mt-lg-0">
                       <a className="btn btn-outline-danger" href="/auth/logout">
                         <i className="bi bi-box-arrow-right me-1" /> Выйти{email ? ` (${email})` : ''}
