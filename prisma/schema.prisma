@@ -23,8 +23,10 @@ model Category {
 model Provider {
   id           Int       @id @default(autoincrement())
   name         String
+  nameSearch   String?   
   slug         String    @unique
   title        String?
+  titleSearch  String?   
   city         String?
   priceFrom    Int?
   rating       Float?    @default(0)
@@ -47,6 +49,8 @@ model Provider {
   reviews      Review[]
 
   @@map("providers")
+  @@index([nameSearch])
+  @@index([titleSearch])
 }
 
 
@@ -66,10 +70,15 @@ model Service {
   id          Int      @id @default(autoincrement())
   providerId  Int
   name        String
+  nameSearch        String?  
   unit        String?
   priceFrom   Int?
   description String?
+  descriptionSearch String?  
   provider    Provider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([nameSearch])
+  @@index([descriptionSearch])
 }
 
 model Project {

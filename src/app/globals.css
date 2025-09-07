@@ -96,3 +96,19 @@ footer{ background:#fff; border-top:1px solid rgba(0,0,0,.06); }
 .object-fit-cover{ object-fit:cover; }           /* встречается на картинках */
 .ratio img{ width:100%; height:100%; }           /* на всякий случай */
 .small-muted{ color:#6c757d; font-size:.875rem;} /* мелкий серый текст */
+
+/* Аватар всегда квадратный и не растягивается */
+.avatar{
+  width: 64px;           /* выбери свой размер: 56/64/72 */
+  height: 64px;
+  object-fit: cover;     /* обрезаем края, чтобы не тянуло */
+  object-position: center;
+  border-radius: 50%;    /* круг; убери/измени, если нужен скруглённый квадрат */
+  display: block;
+  flex: 0 0 64px;        /* фиксируем ширину в флекс-строке */
+}
+
+/* Доп. размеры, если нужны */
+.avatar.avatar-sm { width: 48px; height: 48px; flex-basis: 48px; }
+.avatar.avatar-lg { width: 72px; height: 72px; flex-basis: 72px; }
+
