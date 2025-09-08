@@ -1,8 +1,15 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 
-export async function GET(req: Request) {
+export async function GET() {
   const c = await cookies();
-  c.set('edit_token', '', { path: '/', httpOnly: true, maxAge: 0, sameSite: 'lax', secure: process.env.NODE_ENV === 'production' });
-  return NextResponse.redirect(new URL('/', req.url));
+  c.set('edit_token', '', {
+    path: '/',
+    httpOnly: true,
+    maxAge: 0,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  });
+  // относительный редирект
+  return NextResponse.redirect('/');
 }
