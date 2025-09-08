@@ -1,3 +1,4 @@
+// src/app/api/providers/[id]/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import fs from 'fs/promises';
@@ -22,7 +23,7 @@ function normalizeUploadPath(p?: string | null) {
   if (!p) return null;
   try {
     const url = new URL(p, 'http://local');
-    return url.pathname; // отрежем домен, если пришёл абсолютный URL
+    return url.pathname;
   } catch {
     return p;
   }
@@ -40,6 +41,34 @@ async function saveFile(file: File, prefix: string) {
   return `/uploads/${name}`;
 }
 
+// Универсальный извлекатель ID провайдера из payload токена
+function extractProviderId(payload: any): string | null {
+  if (!payload) return null;
+
+  // частые поля
+  const candidates = [
+    payload.pid,
+    payload.providerId,
+    payload.provider_id,
+    payload.provider,
+    payload.id,
+    payload.sub,        // может быть "206" или "provider:206"
+    payload.userId,
+    payload.user_id,
+  ];
+
+  for (const v of candidates) {
+    if (v == null) continue;
+    const s = String(v);
+    // возьмём первую числовую группу
+    const m = s.match(/\d+/);
+    if (m) return m[0];
+  }
+
+  return null;
+}
+
+// ---------- GET ----------
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: idStr } = await params;
   const id = Number(idStr);
@@ -58,6 +87,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   return NextResponse.json(provider);
 }
 
+// ---------- PATCH ----------
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: idStr } = await params;
   const id = Number(idStr);
@@ -80,11 +110,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     ] as const;
 
     const data: any = {};
-    for (const k of allowed) {
-      if (k in body) data[k] = (body as any)[k];
-    }
+    for (const k of allowed) if (k in body) data[k] = (body as any)[k];
 
-    // Приведение типов и нормализация
     if ('priceFrom' in data) data.priceFrom = toInt(data.priceFrom);
     if ('rating' in data) data.rating = toNum(data.rating);
     if ('reviewsCount' in data) {
@@ -111,12 +138,10 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (typeof data.phone === 'string') data.phone = data.phone.trim() || null;
     if (typeof data.city === 'string') data.city = data.city.trim() || null;
     if (typeof data.title === 'string') data.title = data.title.trim() || null;
-    if (typeof data.about === 'string') data.about = data.about.trim() || null;
+    if (typeof data.about==='string') data.about = data.about.trim() || null;
 
-    // Обновление основных полей
     await prisma.provider.update({ where: { id }, data });
 
-    // Категории (полная замена, если пришли)
     if (Array.isArray((body as any).categoryIds)) {
       const categoryIds = ((body as any).categoryIds as any[])
         .map(Number)
@@ -140,14 +165,46 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   // === multipart/form-data (само-редактирование по edit_token) ===
   if (ct.includes('multipart/form-data')) {
-    const token = cookies().get('edit_token')?.value;
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    try {
-      const payload = await verifyEditToken(token);
-      if (payload.pid !== id) return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-    } catch {
-      return NextResponse.json({ error: 'Bad token' }, { status: 401 });
+  const cookieStore = await cookies();
+  const token = cookieStore.get('edit_token')?.value;
+
+  if (!token) {
+    return NextResponse.json({ error: 'Unauthorized', reason: 'no_cookie' }, { status: 401 });
+  }
+
+  // 1) Декодим токен
+  let emailFromToken: string | null = null;
+  try {
+    const payload = await verifyEditToken(token); // <- твоя функция
+    emailFromToken = (payload as any)?.email ? String((payload as any).email).toLowerCase() : null;
+
+    if (!emailFromToken) {
+      return NextResponse.json(
+        { error: 'Bad token', reason: 'no_email_in_payload', keys: Object.keys(payload || {}) },
+        { status: 401 }
+      );
     }
+  } catch {
+    return NextResponse.json({ error: 'Bad token', reason: 'verify_failed' }, { status: 401 });
+  }
+
+  // 2) Проверяем, что ownerEmail провайдера совпадает с email из токена
+  const provider = await prisma.provider.findUnique({
+    where: { id },
+    select: { ownerEmail: true },
+  });
+
+  if (!provider) {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  const ownerEmail = provider.ownerEmail?.toLowerCase() || null;
+  if (!ownerEmail || ownerEmail !== emailFromToken) {
+    return NextResponse.json(
+      { error: 'Forbidden', reason: 'email_mismatch', expected: ownerEmail, got: emailFromToken },
+      { status: 403 }
+    );
+  }
 
     try {
       const form = await req.formData();
@@ -214,7 +271,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
       await prisma.provider.update({ where: { id }, data: patch });
 
-      // Услуги — пересборка
       await prisma.service.deleteMany({ where: { providerId: id } });
       if (services.length) {
         await prisma.service.createMany({
@@ -228,7 +284,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         });
       }
 
-      // Категории — пересборка
       await prisma.providerCategory.deleteMany({ where: { providerId: id } });
       if (categoryIds.length) {
         await prisma.providerCategory.createMany({
@@ -236,7 +291,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         });
       }
 
-      // Проекты
       const toDeleteIds = existingProjects.filter(p => p._delete).map(p => p.id);
       if (toDeleteIds.length) {
         await prisma.project.deleteMany({ where: { providerId: id, id: { in: toDeleteIds } } });
@@ -270,6 +324,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   return NextResponse.json({ error: 'Unsupported content-type' }, { status: 400 });
 }
 
+// ---------- DELETE ----------
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id: idStr } = await params;
   const id = Number(idStr);
