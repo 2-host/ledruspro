@@ -3,13 +3,14 @@ import { cookies } from 'next/headers';
 
 export async function GET() {
   const c = await cookies();
-  c.set('edit_token', '', {
-    path: '/',
+  c.set("edit_token", "", {
+    path: "/",
     httpOnly: true,
     maxAge: 0,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
   });
-  // относительный редирект
-  return NextResponse.redirect('/');
+
+  const base = process.env.NEXT_PUBLIC_SITE_URL!;
+  return NextResponse.redirect(new URL("/", base));
 }
