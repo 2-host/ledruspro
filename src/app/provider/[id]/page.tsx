@@ -29,9 +29,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const p = await prisma.provider.findUnique({
     where: { id },
     include: {
-      categories: { include: { category: true } },
       services: true,
-      projects: true,
+      reviews: { orderBy: { createdAt: 'desc' }, take: 20 },
+      categories: { include: { category: true } },
+      projects: {
+        orderBy: { id: 'desc' },
+        include: { images: { orderBy: { sort: 'asc' } } },
+      },
     },
   });
 
@@ -40,7 +44,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   }
 
   const cat = p.categories?.[0]?.category?.name ?? 'Услуги';
-  const serviceExample = p.services[0]?.name ?? '';
+  const serviceExample = p.services?.[0]?.name ?? '';
   const city = p.city ?? 'Россия';
 
   const title = `${p.name} — ${cat}${serviceExample ? ` (${serviceExample})` : ''} в ${city}`;
@@ -69,9 +73,12 @@ export default async function ProviderPage({ params }: Props) {
     where: { id },
     include: {
       services: true,
-      projects: true,
       reviews: { orderBy: { createdAt: 'desc' }, take: 20 },
       categories: { include: { category: true } },
+      projects: {
+        orderBy: { id: 'desc' },
+        include: { images: { orderBy: { sort: 'asc' } } },
+      },
     },
   });
 
@@ -106,16 +113,16 @@ export default async function ProviderPage({ params }: Props) {
         <div className="container">
           {/* Хлебные крошки */}
           <nav aria-label="breadcrumb" className="mb-3">
-  <ol className="breadcrumb mb-0">
-    <li className="breadcrumb-item">
-      <a href="/" className="text-decoration-none text-secondary">Главная</a>
-    </li>
-    <li className="breadcrumb-item">
-      <a href={catHref} className="text-decoration-none text-secondary">{catTitle}</a>
-    </li>
-    <li className="breadcrumb-item active" aria-current="page">{p.name}</li>
-  </ol>
-</nav>
+            <ol className="breadcrumb mb-0">
+              <li className="breadcrumb-item">
+                <a href="/" className="text-decoration-none text-secondary">Главная</a>
+              </li>
+              <li className="breadcrumb-item">
+                <a href={catHref} className="text-decoration-none text-secondary">{catTitle}</a>
+              </li>
+              <li className="breadcrumb-item active" aria-current="page">{p.name}</li>
+            </ol>
+          </nav>
 
           {/* Шапка профиля */}
           <div
@@ -130,7 +137,11 @@ export default async function ProviderPage({ params }: Props) {
             <div className="row g-4 align-items-center">
               <div className="col-auto">
                 <img
-                  src={p.avatarUrl || p.projects?.[0]?.imageUrl || 'https://picsum.photos/200'}
+                  src={
+                    p.avatarUrl
+                    || p.projects?.[0]?.images?.[0]?.url
+                    || 'https://picsum.photos/200'
+                  }
                   alt={p.name}
                   style={{
                     width: 96, height: 96, borderRadius: '50%',
@@ -180,7 +191,7 @@ export default async function ProviderPage({ params }: Props) {
 
               {/* Действия */}
               <div className="col-lg-4">
-               
+                {/* место под действия */}
               </div>
             </div>
 
@@ -268,7 +279,6 @@ export default async function ProviderPage({ params }: Props) {
                             {price(s.priceFrom)} {s.unit ? `/${s.unit}` : ''}
                           </td>
                           <td className="text-end">
-                            {/* Кнопка открывает модал; имя услуги кладём в data-атрибут */}
                             <button
                               type="button"
                               className="btn btn-sm btn-primary"
@@ -294,13 +304,30 @@ export default async function ProviderPage({ params }: Props) {
               {/* PORTFOLIO */}
               <section id="portfolio" className="card-modern p-3 mb-3">
                 <h2 className="h5 mb-3">Портфолио</h2>
+
                 {p.projects.length > 0 ? (
-                  <Gallery
-                    items={p.projects.map(pr => ({
-                      src: pr.imageUrl,
-                      title: pr.title || undefined,
-                    }))}
-                  />
+                  <div className="vstack gap-4">
+                    {p.projects.map(project => {
+                      const imgs = Array.isArray(project.images) ? project.images : [];
+                      return (
+                        <div key={project.id}>
+                          {project.title && <h3 className="h6 mb-2">{project.title}</h3>}
+
+                          {imgs.length > 0 ? (
+                            <Gallery
+                              items={imgs.map(img => ({
+                                src: img.url,
+                                title: img.title || project.title || undefined,
+                              }))}
+                              showThumbs
+                            />
+                          ) : (
+                            <div className="text-secondary small">Нет изображений</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 ) : (
                   <div className="text-secondary">Пока нет примеров работ.</div>
                 )}

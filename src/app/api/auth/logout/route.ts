@@ -21,7 +21,7 @@ async function doLogout() {
     secure: process.env.NODE_ENV === 'production',
   });
 
-  const base = getBase();                 // например, https://pro.ledrus.org
+  const base = getBase();                 // например
   return NextResponse.redirect(new URL('/', base)); // абсолютный URL обязателен
 }
 

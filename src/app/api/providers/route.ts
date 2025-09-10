@@ -9,7 +9,7 @@ import { verifyEditToken } from '@/lib/magic'; // <— важно
 
 export const runtime = 'nodejs';
 
-// --- добавить эту функцию ---
+// Сохранение файла в /public/uploads/<folder>/...
 async function saveFile(file: File, folder = 'misc'): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
@@ -22,7 +22,6 @@ async function saveFile(file: File, folder = 'misc'): Promise<string> {
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, name), buffer);
 
-  // публичный URL
   return `/uploads/${folder}/${name}`;
 }
 
@@ -49,7 +48,7 @@ export async function POST(req: Request) {
 
     let ownerEmail = '';
     try {
-      const payload = await verifyEditToken(edit); // { email, pid? ... }
+      const payload = await verifyEditToken(edit); // { email, ... }
       ownerEmail = String(payload.email).toLowerCase().trim();
     } catch {
       return NextResponse.json({ error: 'Сессия недействительна' }, { status: 401 });
@@ -77,10 +76,11 @@ export async function POST(req: Request) {
     let avatarUrl: string | null = null;
     const avatar = form.get('avatar');
     if (avatar instanceof File && avatar.size > 0) {
-      // при желании можно проверить тип: if (!avatar.type.startsWith('image/')) ...
+      // if (!avatar.type.startsWith('image/')) { ... } // при желании
       avatarUrl = await saveFile(avatar, 'avatar');
     }
 
+    // услуги
     let services: Array<{ name: string; priceFrom?: number|null; unit?: string|null; description?: string|null }> = [];
     const servicesJson = form.get('services');
     if (typeof servicesJson === 'string' && servicesJson.trim()) {
@@ -90,16 +90,10 @@ export async function POST(req: Request) {
       } catch {}
     }
 
+    // категории
     const categoryIds = form.getAll('categories')
       .map(v => Number(v))
       .filter(n => Number.isFinite(n)) as number[];
-
-    const portfolioFiles = form.getAll('portfolioFiles') as File[];
-    const portfolioTitles: string[] = [];
-    for (let i = 0; i < portfolioFiles.length; i++) {
-      const t = form.get(`portfolioTitle_${i}`);
-      portfolioTitles.push(typeof t === 'string' ? t : '');
-    }
 
     // slug
     let slug = slugify(name) || `provider-${Date.now()}`;
@@ -138,23 +132,30 @@ export async function POST(req: Request) {
       select: { id: true },
     });
 
-    // 4) Портфолио
-    const images: { imageUrl: string; title?: string }[] = [];
-    for (let i = 0; i < portfolioFiles.length; i++) {
-      const f = portfolioFiles[i];
-      if (f instanceof File && f.size > 0) {
-        const url = await saveFile(f, 'portfolio');
-        images.push({ imageUrl: url, title: portfolioTitles[i] || `Проект #${i+1}` });
-      }
+    // 4) Портфолио: проекты с несколькими изображениями (projectTitle_i + projectFiles_i[*])
+    const projectIndexes = new Set<number>();
+    for (const [key] of form.entries()) {
+      const m = key.match(/^projectTitle_(\d+)$/) || key.match(/^projectFiles_(\d+)$/);
+      if (m) projectIndexes.add(Number(m[1]));
     }
-    if (images.length) {
-      await prisma.project.createMany({
-        data: images.map(img => ({
-          providerId: created.id,
-          imageUrl: img.imageUrl,
-          title: img.title,
-        })),
+
+    for (const idx of projectIndexes) {
+      const title = form.get(`projectTitle_${idx}`);
+      const files = form.getAll(`projectFiles_${idx}`) as File[];
+
+      const createdProject = await prisma.project.create({
+        data: { providerId: created.id, title: typeof title === 'string' ? title || null : null },
+        select: { id: true },
       });
+
+      let sort = 0;
+      for (const f of files) {
+        if (!(f instanceof File) || f.size <= 0) continue;
+        const url = await saveFile(f, 'portfolio');
+        await prisma.projectImage.create({
+          data: { projectId: createdProject.id, url, title: (f as any).name || null, sort: sort++ },
+        });
+      }
     }
 
     return NextResponse.json({ id: created.id }, { status: 201 });
