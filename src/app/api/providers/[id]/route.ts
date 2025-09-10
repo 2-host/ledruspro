@@ -41,30 +41,19 @@ async function saveFile(file: File, prefix: string) {
   return `/uploads/${name}`;
 }
 
-// Универсальный извлекатель ID провайдера из payload токена
+// Универсальный извлекатель ID провайдера из payload токена (на будущее)
 function extractProviderId(payload: any): string | null {
   if (!payload) return null;
-
-  // частые поля
   const candidates = [
-    payload.pid,
-    payload.providerId,
-    payload.provider_id,
-    payload.provider,
-    payload.id,
-    payload.sub,        // может быть "206" или "provider:206"
-    payload.userId,
-    payload.user_id,
+    payload.pid, payload.providerId, payload.provider_id, payload.provider,
+    payload.id, payload.sub, payload.userId, payload.user_id,
   ];
-
   for (const v of candidates) {
     if (v == null) continue;
     const s = String(v);
-    // возьмём первую числовую группу
     const m = s.match(/\d+/);
     if (m) return m[0];
   }
-
   return null;
 }
 
@@ -79,8 +68,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
     include: {
       categories: { include: { category: true } },
       services: true,
-      projects: true,
       reviews: true,
+      projects: {
+        orderBy: { id: 'desc' },
+        include: { images: { orderBy: { sort: 'asc' } } },
+      },
     },
   });
   if (!provider) return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -165,46 +157,46 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
   // === multipart/form-data (само-редактирование по edit_token) ===
   if (ct.includes('multipart/form-data')) {
-  const cookieStore = await cookies();
-  const token = cookieStore.get('edit_token')?.value;
+    const cookieStore = await cookies();
+    const token = cookieStore.get('edit_token')?.value;
 
-  if (!token) {
-    return NextResponse.json({ error: 'Unauthorized', reason: 'no_cookie' }, { status: 401 });
-  }
+    if (!token) {
+      return NextResponse.json({ error: 'Unauthorized', reason: 'no_cookie' }, { status: 401 });
+    }
 
-  // 1) Декодим токен
-  let emailFromToken: string | null = null;
-  try {
-    const payload = await verifyEditToken(token); // <- твоя функция
-    emailFromToken = (payload as any)?.email ? String((payload as any).email).toLowerCase() : null;
+    // 1) Декодим токен
+    let emailFromToken: string | null = null;
+    try {
+      const payload = await verifyEditToken(token);
+      emailFromToken = (payload as any)?.email ? String((payload as any).email).toLowerCase() : null;
 
-    if (!emailFromToken) {
+      if (!emailFromToken) {
+        return NextResponse.json(
+          { error: 'Bad token', reason: 'no_email_in_payload', keys: Object.keys(payload || {}) },
+          { status: 401 }
+        );
+      }
+    } catch {
+      return NextResponse.json({ error: 'Bad token', reason: 'verify_failed' }, { status: 401 });
+    }
+
+    // 2) Проверяем, что ownerEmail провайдера совпадает с email из токена
+    const provider = await prisma.provider.findUnique({
+      where: { id },
+      select: { ownerEmail: true },
+    });
+
+    if (!provider) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    }
+
+    const ownerEmail = provider.ownerEmail?.toLowerCase() || null;
+    if (!ownerEmail || ownerEmail !== emailFromToken) {
       return NextResponse.json(
-        { error: 'Bad token', reason: 'no_email_in_payload', keys: Object.keys(payload || {}) },
-        { status: 401 }
+        { error: 'Forbidden', reason: 'email_mismatch', expected: ownerEmail, got: emailFromToken },
+        { status: 403 }
       );
     }
-  } catch {
-    return NextResponse.json({ error: 'Bad token', reason: 'verify_failed' }, { status: 401 });
-  }
-
-  // 2) Проверяем, что ownerEmail провайдера совпадает с email из токена
-  const provider = await prisma.provider.findUnique({
-    where: { id },
-    select: { ownerEmail: true },
-  });
-
-  if (!provider) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
-
-  const ownerEmail = provider.ownerEmail?.toLowerCase() || null;
-  if (!ownerEmail || ownerEmail !== emailFromToken) {
-    return NextResponse.json(
-      { error: 'Forbidden', reason: 'email_mismatch', expected: ownerEmail, got: emailFromToken },
-      { status: 403 }
-    );
-  }
 
     try {
       const form = await req.formData();
@@ -243,6 +235,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         } catch {}
       }
 
+      // существующие проекты: обновление заголовков / удаление целиком
       let existingProjects: Array<{ id: number; title?: string; _delete?: boolean }> = [];
       const existingJson = form.get('existingProjects');
       if (typeof existingJson === 'string' && existingJson.trim()) {
@@ -250,13 +243,6 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
           const parsed = JSON.parse(existingJson);
           if (Array.isArray(parsed)) existingProjects = parsed;
         } catch {}
-      }
-
-      const portfolioFiles = form.getAll('portfolioFiles') as File[];
-      const portfolioTitles: string[] = [];
-      for (let i = 0; i < portfolioFiles.length; i++) {
-        const t = form.get(`portfolioTitle_${i}`);
-        portfolioTitles.push(typeof t === 'string' ? t : '');
       }
 
       const patch: any = {
@@ -271,6 +257,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
       await prisma.provider.update({ where: { id }, data: patch });
 
+      // перезаписываем услуги
       await prisma.service.deleteMany({ where: { providerId: id } });
       if (services.length) {
         await prisma.service.createMany({
@@ -284,6 +271,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         });
       }
 
+      // перезаписываем категории
       await prisma.providerCategory.deleteMany({ where: { providerId: id } });
       if (categoryIds.length) {
         await prisma.providerCategory.createMany({
@@ -291,6 +279,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         });
       }
 
+      // удаление/обновление существующих проектов
       const toDeleteIds = existingProjects.filter(p => p._delete).map(p => p.id);
       if (toDeleteIds.length) {
         await prisma.project.deleteMany({ where: { providerId: id, id: { in: toDeleteIds } } });
@@ -300,18 +289,30 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
         await prisma.project.update({ where: { id: u.id }, data: { title: u.title || null } });
       }
 
-      const newImgs: { imageUrl: string; title?: string }[] = [];
-      for (let i = 0; i < portfolioFiles.length; i++) {
-        const f = portfolioFiles[i];
-        if (f && (f as any).size > 0) {
-          const url = await saveFile(f, 'portfolio');
-          newImgs.push({ imageUrl: url, title: portfolioTitles[i] || undefined });
-        }
+      // === Новые проекты и их изображения (projectTitle_i + projectFiles_i[*]) ===
+      const projectIndexes = new Set<number>();
+      for (const [key] of form.entries()) {
+        const m = key.match(/^projectTitle_(\d+)$/) || key.match(/^projectFiles_(\d+)$/);
+        if (m) projectIndexes.add(Number(m[1]));
       }
-      if (newImgs.length) {
-        await prisma.project.createMany({
-          data: newImgs.map(img => ({ providerId: id, imageUrl: img.imageUrl, title: img.title })),
+
+      for (const idx of projectIndexes) {
+        const title = form.get(`projectTitle_${idx}`);
+        const files = form.getAll(`projectFiles_${idx}`) as File[];
+
+        const createdProject = await prisma.project.create({
+          data: { providerId: id, title: typeof title === 'string' ? title || null : null },
+          select: { id: true },
         });
+
+        let sort = 0;
+        for (const f of files) {
+          if (!(f instanceof File) || f.size <= 0) continue;
+          const url = await saveFile(f, 'portfolio');
+          await prisma.projectImage.create({
+            data: { projectId: createdProject.id, url, title: (f as any).name || null, sort: sort++ },
+          });
+        }
       }
 
       return NextResponse.json({ ok: true });
@@ -332,14 +333,19 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 
   const provider = await prisma.provider.findUnique({
     where: { id },
-    include: { projects: true },
+    include: { projects: { include: { images: true } } },
   });
   if (!provider) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
+  // соберём относительные пути для удаления
   const filesToRemove = new Set<string>();
-  if (provider.avatarUrl && provider.avatarUrl.startsWith('/uploads/')) filesToRemove.add(provider.avatarUrl);
+  if (provider.avatarUrl && provider.avatarUrl.startsWith('/uploads/')) {
+    filesToRemove.add(provider.avatarUrl);
+  }
   for (const p of provider.projects) {
-    if (p.imageUrl && p.imageUrl.startsWith('/uploads/')) filesToRemove.add(p.imageUrl);
+    for (const img of p.images) {
+      if (img.url && img.url.startsWith('/uploads/')) filesToRemove.add(img.url);
+    }
   }
 
   try {

@@ -5,8 +5,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 type ServiceRow = { name: string; priceFrom?: number | ''; unit?: string; desc?: string };
-type PortfolioItem = { title: string; file?: File | null };
 type Category = { id: number; name: string; slug: string };
+type Project = { title: string; files: File[] };
 
 export default function ProviderNewForm() {
   const router = useRouter();
@@ -24,7 +24,9 @@ export default function ProviderNewForm() {
   const [services, setServices] = useState<ServiceRow[]>([
     { name: 'Консультация', priceFrom: 2000, unit: 'час', desc: 'Выезд и первичный расчёт' },
   ]);
-  const [portfolio, setPortfolio] = useState<PortfolioItem[]>([{ title: 'Проект #1', file: null }]);
+
+  // 🔥 Новая структура проектов: на каждый проект — массив файлов
+  const [projects, setProjects] = useState<Project[]>([{ title: 'Проект #1', files: [] }]);
 
   const [cats, setCats] = useState<Category[]>([]);
   const [selectedCatIds, setSelectedCatIds] = useState<number[]>([]);
@@ -37,19 +39,34 @@ export default function ProviderNewForm() {
   }, []);
 
   const toggleCat = (id: number) =>
-    setSelectedCatIds(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
+    setSelectedCatIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const addService = () => setServices(s => [...s, { name: '', priceFrom: '', unit: 'проект', desc: '' }]);
   const removeService = (idx: number) => setServices(s => s.filter((_, i) => i !== idx));
   const updateService = (idx: number, patch: Partial<ServiceRow>) =>
     setServices(s => s.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
 
-  const addPortfolio = () => setPortfolio(g => [...g, { title: '', file: null }]);
-  const removePortfolio = (idx: number) => setPortfolio(g => g.filter((_, i) => i !== idx));
-  const updatePortfolio = (idx: number, patch: Partial<PortfolioItem>) =>
-    setPortfolio(g => g.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+  // ==== Проекты ====
+  const addProject = () => setProjects(p => [...p, { title: `Проект #${p.length + 1}`, files: [] }]);
+  const removeProject = (idx: number) => setProjects(p => p.filter((_, i) => i !== idx));
+  const updateProjectTitle = (idx: number, title: string) =>
+    setProjects(p => p.map((row, i) => (i === idx ? { ...row, title } : row)));
+
+  // Мульти-загрузка файлов
+  const addFilesToProject = (idx: number, filesList: FileList | null) => {
+    if (!filesList || filesList.length === 0) return;
+    const files = Array.from(filesList);
+    setProjects(p => p.map((row, i) => (i === idx ? { ...row, files: [...row.files, ...files] } : row)));
+  };
+
+  const removeFileFromProject = (idx: number, fileIndex: number) => {
+    setProjects(p => p.map((row, i) => {
+      if (i !== idx) return row;
+      const next = [...row.files];
+      next.splice(fileIndex, 1);
+      return { ...row, files: next };
+    }));
+  };
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -81,9 +98,13 @@ export default function ProviderNewForm() {
           }))
       ));
 
-      portfolio.forEach((p, idx) => {
-        if (p.file) fd.append('portfolioFiles', p.file, p.file.name);
-        fd.append(`portfolioTitle_${idx}`, p.title || '');
+      // 🔥 Главное: массовая отправка по проектам
+      // Формат: projectTitle_<i>, projectFiles_<i> (несколько файлов)
+      projects.forEach((proj, i) => {
+        fd.append(`projectTitle_${i}`, proj.title || `Проект #${i+1}`);
+        for (const file of proj.files) {
+          fd.append(`projectFiles_${i}`, file, file.name);
+        }
       });
 
       const res = await fetch('/api/providers', { method: 'POST', body: fd });
@@ -114,7 +135,6 @@ export default function ProviderNewForm() {
                 {/* Профиль */}
                 <div className="card-modern p-3 mb-3">
                   <h2 className="h5 mb-3">Профиль</h2>
-
                   <div className="row g-3">
                     <div className="col-md-6">
                       <label className="form-label">Тип</label>
@@ -123,24 +143,18 @@ export default function ProviderNewForm() {
                         <option value="individual">Индивидуальный специалист</option>
                       </select>
                     </div>
-
                     <div className="col-md-6">
                       <label className="form-label">Название/ФИО</label>
                       <input className="form-control" value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="Например: Atelier Forma" required />
                     </div>
-
                     <div className="col-md-6">
                       <label className="form-label">Город</label>
                       <input className="form-control" value={city} onChange={e=>setCity(e.target.value)} placeholder="Москва" />
                     </div>
-
                     <div className="col-md-6">
                       <label className="form-label">Опыт (лет)</label>
                       <input
-                        type="number"
-                        min={0}
-                        max={60}
-                        className="form-control"
+                        type="number" min={0} max={60} className="form-control"
                         value={experienceYears}
                         onChange={e => {
                           const v = e.target.value === '' ? '' : Math.max(0, Math.min(60, Number(e.target.value)));
@@ -149,22 +163,18 @@ export default function ProviderNewForm() {
                         placeholder="Например: 7"
                       />
                     </div>
-
                     <div className="col-md-6">
                       <label className="form-label">Телефон</label>
                       <input className="form-control" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="+7 999 000-00-00" />
                     </div>
-
                     <div className="col-md-12">
                       <label className="form-label">Описание</label>
                       <textarea className="form-control" rows={3} value={about} onChange={e=>setAbout(e.target.value)} placeholder="Коротко о вас и подходе к работе" />
                     </div>
-
                     <div className="col-md-6">
                       <label className="form-label">Сайт</label>
                       <input className="form-control" value={website} onChange={e=>setWebsite(e.target.value)} placeholder="https://..." />
                     </div>
-
                     <div className="col-md-6">
                       <label className="form-label">Аватар</label>
                       <input className="form-control" type="file" accept="image/*" onChange={e=>setAvatar(e.target.files?.[0] || null)} />
@@ -196,108 +206,170 @@ export default function ProviderNewForm() {
                 </div>
 
                 {/* Услуги */}
-                <div className="card-modern p-3 mb-3">
-                  <div className="d-flex align-items-center justify-content-between">
-                    <h2 className="h5 mb-0">Услуги и цены</h2>
-                    <button type="button" onClick={addService} className="btn btn-outline-primary btn-sm">
-                      <i className="bi bi-plus-lg" /> Добавить услугу
-                    </button>
-                  </div>
-                  <div className="table-responsive mt-2">
-                    <table className="table align-middle">
-                      <thead className="small text-secondary">
-                        <tr>
-                          <th>Услуга</th>
-                          <th className="text-nowrap">Цена от</th>
-                          <th className="text-nowrap">Ед.</th>
-                          <th>Описание</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {services.map((s, idx) => (
-                          <tr key={idx}>
-                            <td style={{minWidth:220}}>
-                              <input className="form-control"
-                                     value={s.name}
-                                     onChange={e=>updateService(idx,{name:e.target.value})}
-                                     placeholder="Например: Проект освещения" />
-                            </td>
-                            <td style={{maxWidth:140}}>
-                              <input type="number" min={0} className="form-control"
-                                     value={s.priceFrom ?? ''}
-                                     onChange={e=>updateService(idx,{priceFrom:e.target.value === '' ? '' : Number(e.target.value)})}
-                                     placeholder="0" />
-                            </td>
-                            <td style={{maxWidth:140}}>
-                              <select className="form-select" value={s.unit || 'проект'} onChange={e=>updateService(idx,{unit:e.target.value})}>
-                                <option>проект</option>
-                                <option>час</option>
-                                <option>м²</option>
-                                <option>шт</option>
-                              </select>
-                            </td>
-                            <td>
-                              <input className="form-control"
-                                     value={s.desc || ''}
-                                     onChange={e=>updateService(idx,{desc:e.target.value})}
-                                     placeholder="Короткое описание" />
-                            </td>
-                            <td className="text-end">
-                              <button type="button" className="btn btn-outline-danger btn-sm" onClick={()=>removeService(idx)}>
-                                <i className="bi bi-trash" />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {services.length === 0 && (
-                          <tr><td colSpan={5} className="text-secondary">Добавьте хотя бы одну услугу</td></tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                {/* Услуги */}
+<div className="card-modern p-3 mb-3">
+  <div className="d-flex align-items-center justify-content-between">
+    <h2 className="h5 mb-0">Услуги и цены</h2>
+    <button type="button" onClick={addService} className="btn btn-outline-primary btn-sm">
+      <i className="bi bi-plus-lg" /> Добавить услугу
+    </button>
+  </div>
 
-                {/* Портфолио */}
+  <div className="vstack gap-3 mt-3">
+    {services.map((s, idx) => (
+      <div key={idx} className="border rounded p-3">
+        {/* Название */}
+        <div className="mb-2">
+          <label className="form-label small mb-1">Название услуги</label>
+          <input
+            className="form-control"
+            value={s.name}
+            onChange={e => updateService(idx, { name: e.target.value })}
+            placeholder="Например: Проект освещения"
+          />
+        </div>
+
+        {/* Цена и Единица */}
+        <div className="row g-2 mb-2">
+          <div className="col-sm-6 col-md-4">
+            <label className="form-label small mb-1">Цена от</label>
+            <input
+              type="number"
+              min={0}
+              className="form-control"
+              value={s.priceFrom ?? ''}
+              onChange={e =>
+                updateService(idx, {
+                  priceFrom: e.target.value === '' ? '' : Number(e.target.value),
+                })
+              }
+              placeholder="0"
+            />
+          </div>
+          <div className="col-sm-6 col-md-4">
+            <label className="form-label small mb-1">Единица</label>
+            <select
+              className="form-select"
+              value={s.unit || 'проект'}
+              onChange={e => updateService(idx, { unit: e.target.value })}
+            >
+              <option value="проект">проект</option>
+              <option value="час">час</option>
+              <option value="м²">м²</option>
+              <option value="шт">шт</option>
+            </select>
+          </div>
+          <div className="col-sm-12 col-md-4 d-flex align-items-end">
+            <div className="ms-auto">
+              <button
+                type="button"
+                className="btn btn-outline-danger"
+                onClick={() => removeService(idx)}
+              >
+                <i className="bi bi-trash" /> Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Большое описание */}
+        <div>
+          <label className="form-label small mb-1">Описание</label>
+          <textarea
+            className="form-control"
+            rows={4} // 👈 больше места под текст
+            value={s.desc || ''}
+            onChange={e => updateService(idx, { desc: e.target.value })}
+            placeholder="Коротко опишите, что входит в услугу (этапы, условия, что даёт клиенту)"
+          />
+        </div>
+      </div>
+    ))}
+
+    {services.length === 0 && (
+      <div className="text-secondary">Добавьте хотя бы одну услугу</div>
+    )}
+  </div>
+</div>
+
+
+                {/* 🔥 ПРОЕКТЫ с мультизагрузкой */}
                 <div className="card-modern p-3 mb-3">
                   <div className="d-flex align-items-center justify-content-between">
-                    <h2 className="h5 mb-0">Портфолио</h2>
-                    <button type="button" onClick={addPortfolio} className="btn btn-outline-primary btn-sm">
+                    <h2 className="h5 mb-0">Проекты</h2>
+                    <button type="button" onClick={addProject} className="btn btn-outline-primary btn-sm">
                       <i className="bi bi-plus-lg" /> Добавить проект
                     </button>
                   </div>
-                  <div className="row g-3 mt-1">
-                    {portfolio.map((p, idx) => (
-                      <div className="col-md-6" key={idx}>
-                        <div className="card-modern p-2">
-                          <div className="ratio ratio-4x3 rounded overflow-hidden mb-2">
-                            <img
-                              src={p.file ? URL.createObjectURL(p.file) : 'https://images.unsplash.com/photo-1615870216515-4f0f1a9d1d5c?q=80&w=800&auto=format&fit=crop'}
-                              className="w-100 h-100 object-fit-cover"
-                              alt="preview"
+
+                  <div className="vstack gap-3 mt-2">
+                    {projects.map((proj, idx) => (
+                      <div key={idx} className="card-modern p-2">
+                        <div className="d-flex align-items-center gap-2 mb-2">
+                          <input
+                            className="form-control"
+                            value={proj.title}
+                            onChange={(e)=>updateProjectTitle(idx, e.target.value)}
+                            placeholder={`Проект #${idx+1}`}
+                          />
+                          <button type="button" className="btn btn-outline-danger btn-sm" onClick={()=>removeProject(idx)}>
+                            <i className="bi bi-trash" />
+                          </button>
+                        </div>
+
+                        <div className="d-flex align-items-center gap-2 mb-2">
+                          <label className="btn btn-outline-secondary btn-sm mb-0">
+                            <i className="bi bi-upload me-1" />
+                            Загрузить фото
+                            <input
+                              type="file"
+                              accept="image/*"
+                              multiple
+                              hidden
+                              onChange={e => addFilesToProject(idx, e.target.files)}
                             />
-                          </div>
-                          <input
-                            className="form-control form-control-sm mb-2"
-                            value={p.title}
-                            onChange={e=>updatePortfolio(idx,{title:e.target.value})}
-                            placeholder="Название проекта"
-                          />
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="form-control form-control-sm"
-                            onChange={e=>updatePortfolio(idx,{file:e.target.files?.[0]||null})}
-                          />
-                          <div className="text-end mt-2">
-                            <button type="button" className="btn btn-outline-danger btn-sm" onClick={()=>removePortfolio(idx)}>
-                              <i className="bi bi-trash" />
-                            </button>
+                          </label>
+                          <div className="text-secondary small">
+                            Можно выбрать сразу несколько изображений.
                           </div>
                         </div>
+
+                        {proj.files.length > 0 ? (
+                          <div className="row g-2">
+                            {proj.files.map((file, fi) => (
+                              <div className="col-6 col-md-4 col-lg-3" key={fi}>
+                                <div className="position-relative">
+                                  <div className="ratio ratio-4x3 rounded overflow-hidden">
+                                    <img
+                                      src={URL.createObjectURL(file)}
+                                      className="w-100 h-100 object-fit-cover"
+                                      alt={file.name}
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-danger position-absolute"
+                                    style={{ top: 6, right: 6, borderRadius: 999 }}
+                                    onClick={() => removeFileFromProject(idx, fi)}
+                                    aria-label="Удалить"
+                                    title="Удалить"
+                                  >
+                                    <i className="bi bi-x-lg" />
+                                  </button>
+                                </div>
+                                <div className="small text-truncate mt-1">{file.name}</div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="text-secondary small">Фотографии не выбраны</div>
+                        )}
                       </div>
                     ))}
-                    {portfolio.length === 0 && <div className="text-secondary">Добавьте хотя бы одно изображение</div>}
+
+                    {projects.length === 0 && (
+                      <div className="text-secondary">Добавьте хотя бы один проект</div>
+                    )}
                   </div>
                 </div>
 

@@ -74,11 +74,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                           <i className="bi bi-pencil-square me-1" /> Создать профиль
                         </a>
                       </li>
-                    <li className="nav-item ms-lg-2 mt-2 mt-lg-0">
-                      <a className="btn btn-outline-danger" href="/api/auth/logout">
-  <i className="bi bi-box-arrow-right me-1" /> Выйти{email ? ` (${email})` : ''}
-</a>
-                    </li>
+                  
                   </>
                 )}
               </ul>

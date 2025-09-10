@@ -54,7 +54,6 @@ const servicesByCategory: Record<string, {name:string, priceFrom:number}[]> = {
 };
 
 const unsplashAvatars = [
-  // портреты
   'https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=256&auto=format&fit=crop',
   'https://images.unsplash.com/photo-1502685104226-ee32379fefbe?q=80&w=256&auto=format&fit=crop',
   'https://images.unsplash.com/photo-1527980965255-d3b416303d12?q=80&w=256&auto=format&fit=crop',
@@ -81,30 +80,6 @@ function makeCompanyOrPerson(): {name:string; title:string} {
     const name = `${pick(firstNames)} ${pick(lastNames)}`;
     return { name, title: 'Частный мастер' };
   }
-}
-
-function makeProjects(seed:number) {
-  // 6–10 фото портфолио
-  const imgs = [
-    'photo-1616596872547-6cebdfdbf1b9',
-    'photo-1615870216515-4f0f1a9d1d5c',
-    'photo-1556909190-eccf4a8bf97a',
-    'photo-1519710164239-da123dc03ef4',
-    'photo-1598555664790-8c647e8ca1bd',
-    'photo-1522542550221-31fd19575a2d',
-    'photo-1504805572947-34fad45aed93',
-    'photo-1524758631624-e2822e304c36',
-  ];
-  const count = rand(6,10);
-  const arr = [];
-  for (let i=0;i<count;i++) {
-    const pid = pick(imgs);
-    arr.push({
-      title: `Проект #${seed}-${i+1}`,
-      imageUrl: `https://images.unsplash.com/${pid}?q=80&w=1200&auto=format&fit=crop`,
-    });
-  }
-  return arr;
 }
 
 function makeReviews(): {rating:number, authorName:string, authorAvatar?:string, text:string}[] {
@@ -141,6 +116,20 @@ const aboutTemplates = [
   'Комплекс: от ТЗ до сдачи. {cat}. Гибкие условия и договор. {city}.',
   'Профессионально, в срок и без сюрпризов. {cat}. Работаем по договору. {city}.',
 ];
+const serviceDescTemplates = [
+  '{service}: выезжаем на объект, фиксируем ТЗ, предлагаем 2–3 варианта решений. Включаем базовые спецификации и рекомендации по материалам.',
+  '{service}: аккуратно и в срок. Работаем по договору, согласовываем этапы и смету заранее.',
+  '{service}: детальные пояснения и оптимизация под бюджет. Предоставляем отчёт по итогам и рекомендации по дальнейшим шагам.',
+  '{service}: учитываем нормы и требования. Обновляем документацию по мере согласований, сопровождаем до сдачи.',
+  '{service}: прозрачные сроки, понятные этапы и контроль качества. Под ключ.',
+];
+
+function makeServiceDesc(serviceName: string) {
+  // 1–2 предложения из шаблонов
+  const first = pick(serviceDescTemplates).replace('{service}', serviceName);
+  const maybeSecond = Math.random() < 0.5 ? ' Поддерживаем связь и даём быстрые правки.' : '';
+  return (first + maybeSecond).trim();
+}
 
 function makeAbout(catName: string, city: string) {
   const years = rand(3, 15);
@@ -152,10 +141,50 @@ function makeAbout(catName: string, city: string) {
 }
 /** -------------------------------------------------------- */
 
+/** ---------- НОВОЕ: проекты с несколькими фото ---------- */
+function makeProjectsWithImages(seed: number) {
+  // пул изображений (Unsplash ids)
+  const ids = [
+    'photo-1616596872547-6cebdfdbf1b9',
+    'photo-1615870216515-4f0f1a9d1d5c',
+    'photo-1556909190-eccf4a8bf97a',
+    'photo-1519710164239-da123dc03ef4',
+    'photo-1598555664790-8c647e8ca1bd',
+    'photo-1522542550221-31fd19575a2d',
+    'photo-1504805572947-34fad45aed93',
+    'photo-1524758631624-e2822e304c36',
+  ];
+
+  // создадим 3–5 проектов; в каждом 2–5 фото
+  const projectsCount = rand(3, 5);
+  const projects = [];
+
+  for (let p=0; p<projectsCount; p++) {
+    const imagesCount = rand(2, 5);
+    const images = [];
+    for (let i=0; i<imagesCount; i++) {
+      const pid = pick(ids);
+      images.push({
+        url: `https://images.unsplash.com/${pid}?q=80&w=1600&auto=format&fit=crop`,
+        title: `Фото ${p+1}-${i+1}`,
+        sort: i,
+      });
+    }
+    projects.push({
+      title: `Проект #${seed}-${p+1}`,
+      images: { create: images },
+    });
+  }
+
+  return projects;
+}
+/** -------------------------------------------------------- */
+
 async function main() {
   // очистка (сначала дочерние)
   await prisma.providerCategory.deleteMany({});
   await prisma.review.deleteMany({});
+  await prisma.projectImage.deleteMany({}); // ⬅️ НОВОЕ
   await prisma.project.deleteMany({});
   await prisma.service.deleteMany({});
   await prisma.provider.deleteMany({});
@@ -172,7 +201,6 @@ async function main() {
   for (let i=1; i<=total; i++) {
     const { name, title } = makeCompanyOrPerson();
 
-    // равномерно разбрасываем по категориям
     const mainCat = categories[i % categories.length];
     const catSlug = mainCat.slug as keyof typeof servicesByCategory;
 
@@ -181,11 +209,9 @@ async function main() {
     const reviewsCount = rand(15, 180);
     const isVerified = Math.random() < 0.55;
 
-    // Новые флаги:
     const passportVerified = isVerified ? Math.random() < 0.8 : Math.random() < 0.25;
     const worksByContract  = (title === 'Студия / Компания' ? Math.random() < 0.75 : Math.random() < 0.45) || isVerified;
 
-    // Прайс «от» из сервисов
     const servicesPreset = servicesByCategory[catSlug] || [];
     const providerPriceFrom = servicesPreset.length
       ? Math.min(...servicesPreset.map(s => s.priceFrom))
@@ -204,12 +230,18 @@ async function main() {
         worksByContract,
         priceFrom: providerPriceFrom,
         avatarUrl: pick(unsplashAvatars),
-
-        // НОВОЕ: короткое описание
         about: makeAbout(mainCat.name, city),
 
-        services: { create: servicesPreset.map(s => ({ ...s })) },
-        projects: { create: makeProjects(i) },
+        services: {
+  create: servicesPreset.map(s => ({
+    ...s,
+    description: makeServiceDesc(s.name),
+  })),
+},
+
+
+        // НОВОЕ: проекты с вложенными изображениями
+        projects: { create: makeProjectsWithImages(i) },
       },
     });
 
