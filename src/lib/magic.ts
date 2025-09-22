@@ -7,7 +7,7 @@ const alg = 'HS256';
 type EmailTokenPayload = { email: string; t: number }; // t = issued at (ms)
 type EditTokenPayload  = { email: string; pid: number; t: number };
 
-export async function signEmailToken(email: string, ttlSec = 30 * 60) {
+export async function signEmailToken(email: string, ttlSec = 24 * 30 * 60) {
   const nowSec = Math.floor(Date.now() / 1000);
   return await new SignJWT({ email, t: Date.now() } as EmailTokenPayload)
     .setProtectedHeader({ alg })
@@ -21,7 +21,7 @@ export async function verifyEmailToken(token: string) {
   return payload as JWTPayload & EmailTokenPayload;
 }
 
-export async function signEditToken(email: string, pid: number, ttlSec = 60 * 60) {
+export async function signEditToken(email: string, pid: number, ttlSec = 24 * 60 * 60) {
   const nowSec = Math.floor(Date.now() / 1000);
   return await new SignJWT({ email, pid, t: Date.now() } as EditTokenPayload)
     .setProtectedHeader({ alg })

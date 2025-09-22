@@ -1,55 +1,61 @@
-// src/app/c/[slug]/page.tsx
+// src/app/c/[...slugs]/page.tsx
 import { prisma } from '@/lib/prisma';
 import type { Metadata } from 'next';
 import FavoriteButton from '@/components/FavoriteButton';
 
-type PageProps = {
-  params: Promise<{ slug: string }>;
-  searchParams: Promise<{
-    city?: string;
-    rating?: string;
-    q?: string;
-    view?: 'grid' | 'list';
-    page?: string;
-    passport?: string; // "1" | "true"
-    contract?: string; // "1" | "true"
-  }>;
-};
+/** ========= helpers ========= */
 
-// транслит кириллицы → латиница под слуги
-const translitMap: Record<string, string> = {
-  а:'a', б:'b', в:'v', г:'g', д:'d', е:'e', ё:'yo', ж:'zh', з:'z', и:'i', й:'y',
-  к:'k', л:'l', м:'m', н:'n', о:'o', п:'p', р:'r', с:'s', т:'t', у:'u', ф:'f',
-  х:'h', ц:'ts', ч:'ch', ш:'sh', щ:'sch', ъ:'', ы:'y', ь:'', э:'e', ю:'yu', я:'ya',
-};
-function translit(input: string) {
-  return input
-    .toLowerCase()
-    .split('')
-    .map((ch) => translitMap[ch] ?? ch)
-    .join('');
+// Находим категорию по массиву сегментов URL (parent/child -> fullSlug)
+// Возвращаем level/fullSlug/parentId — нужно для плиток навигации
+async function findCategoryBySegments(segments: string[]) {
+  if (!segments || segments.length === 0) return null;
+
+  const decoded = segments.map((s) => {
+    try { return decodeURIComponent(s); } catch { return s; }
+  });
+  const full = decoded.map(s => s.toLowerCase()).join('/');
+
+  // 1) точное совпадение по fullSlug (parent/child)
+  const byFull = await prisma.category.findFirst({
+    where: { fullSlug: full },
+    select: {
+      id: true,
+      name: true,
+      level: true,
+      fullSlug: true,
+      parentId: true,
+      seoH1: true,
+      seoTitle: true,
+      seoDescription: true,
+      seoKeywords: true,
+    },
+  });
+  if (byFull) return byFull;
+
+  // 2) допускаем упрощённый slug/name ТОЛЬКО для одиночного сегмента
+  if (segments.length === 1) {
+    return prisma.category.findFirst({
+      where: { OR: [{ slug: full }, { name: decoded[0] }] },
+      select: {
+        id: true,
+        name: true,
+        level: true,
+        fullSlug: true,
+        parentId: true,
+        seoH1: true,
+        seoTitle: true,
+        seoDescription: true,
+        seoKeywords: true,
+      },
+    });
+  }
+
+  return null;
 }
-function slugify(input: string) {
-  return translit(input)
-    .replace(/\s+/g, '-')
-    .replace(/[^a-z0-9-]/g, '')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-}
 
-const PER_PAGE = 8;
-
-function truncateText(s: string | null | undefined, max = 500) {
-  if (!s) return '';
-  if (s.length <= max) return s;
-  const cut = s.slice(0, max);
-  const lastSpace = cut.lastIndexOf(' ');
-  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + '…';
-}
-
-// Собираем href с сохранением фильтров/вида и возможной заменой page
+// Генерация href для текущего пути с сохранением query-параметров (для пагинации/вида)
 function buildHref(
-  rawSlug: string,
+  segments: string[],
   sp: Record<string, string | undefined>,
   overrides: Partial<{ page: number; view: 'grid' | 'list' }> = {}
 ) {
@@ -66,41 +72,40 @@ function buildHref(
     if (!Number.isNaN(p) && p > 1) params.set('page', String(p));
   }
   const qs = params.toString();
-  return `/c/${rawSlug}${qs ? `?${qs}` : ''}`;
+  const path = segments.length ? `/c/${segments.map(encodeURIComponent).join('/')}` : '/c/all';
+  return `${path}${qs ? `?${qs}` : ''}`;
 }
 
-// Диапазон номеров страниц (с «…»)
+// Пагинация (с «…»)
 function makePages(current: number, total: number): (number | 'dots')[] {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-  const pages = new Set<number>();
-  pages.add(1);
-  pages.add(2);
-  pages.add(total);
-  pages.add(total - 1);
-  pages.add(current);
-  pages.add(current - 1);
-  pages.add(current + 1);
+  const pages = new Set<number>([1, 2, total, total - 1, current, current - 1, current + 1]);
   const arr = Array.from(pages).filter(p => p >= 1 && p <= total).sort((a,b)=>a-b);
-  const withDots: (number | 'dots')[] = [];
+  const out: (number | 'dots')[] = [];
   for (let i = 0; i < arr.length; i++) {
-    withDots.push(arr[i]);
-    if (i < arr.length - 1 && arr[i + 1] - arr[i] > 1) withDots.push('dots');
+    out.push(arr[i]);
+    if (i < arr.length - 1 && arr[i + 1] - arr[i] > 1) out.push('dots');
   }
-  return withDots;
+  return out;
 }
 
-/** ====== ВАЖНО: generateMetadata на верхнем уровне модуля ====== */
-export async function generateMetadata(
-  { params }: { params: Promise<{ slug: string }> }
-): Promise<Metadata> {
-  const { slug: rawSlug } = await params;
+// Триммер описаний
+function truncateText(s: string | null | undefined, max = 500) {
+  if (!s) return '';
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max);
+  const lastSpace = cut.lastIndexOf(' ');
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut) + '…';
+}
 
-  let decoded = rawSlug;
-  try { decoded = decodeURIComponent(rawSlug); } catch {}
+const PER_PAGE = 8;
 
-  const isLatin = /^[a-z0-9-]+$/i.test(decoded);
-  const latinCandidate = isLatin ? decoded.toLowerCase() : slugify(decoded);
-  const isAll = latinCandidate === 'all' || decoded.toLowerCase() === 'all';
+/** ========= SEO ========= */
+type MetaParams = { params: Promise<{ slugs?: string[] }> };
+
+export async function generateMetadata({ params }: MetaParams): Promise<Metadata> {
+  const { slugs = [] } = await params;
+  const isAll = slugs.length === 0 || (slugs.length === 1 && slugs[0].toLowerCase() === 'all');
 
   if (isAll) {
     return {
@@ -110,75 +115,107 @@ export async function generateMetadata(
     };
   }
 
-  const cat = await prisma.category.findFirst({
-    where: { OR: [{ slug: latinCandidate }, { name: decoded }] },
-    select: { name: true, seoTitle: true, seoDescription: true, seoKeywords: true },
-  });
-
-  const fallbackTitle = cat?.name ?? decoded;
+  const cat = await findCategoryBySegments(slugs);
+  const fallback = (() => {
+    const last = slugs[slugs.length - 1] || 'Категория';
+    try { return decodeURIComponent(last); } catch { return last; }
+  })();
 
   return {
-    title: cat?.seoTitle || fallbackTitle,
+    title: cat?.seoTitle || (cat?.name ?? fallback),
     description:
       cat?.seoDescription ||
-      `Исполнители категории «${fallbackTitle}». Сравните портфолио, цены и отзывы.`,
+      `Исполнители категории «${cat?.name ?? fallback}». Сравните портфолио, цены и отзывы.`,
     keywords: cat?.seoKeywords || undefined,
   };
 }
 
-/** ====== Страница категории ====== */
+/** ========= Страница категории ========= */
+type PageProps = {
+  params: Promise<{ slugs?: string[] }>;
+  searchParams: Promise<{
+    city?: string;
+    rating?: string;
+    q?: string;
+    view?: 'grid' | 'list';
+    page?: string;
+    passport?: string; // "1" | "true"
+    contract?: string; // "1" | "true"
+  }>;
+};
+
 export default async function CategoryPage({ params, searchParams }: PageProps) {
-  const { slug: rawSlug } = await params;
+  const { slugs = [] } = await params;
   const sp = await searchParams;
 
-  let decoded = rawSlug;
-  try { decoded = decodeURIComponent(rawSlug); } catch {}
+  const isAll = slugs.length === 0 || (slugs.length === 1 && slugs[0].toLowerCase() === 'all');
+  const cat = isAll ? null : await findCategoryBySegments(slugs);
 
-  const isLatin = /^[a-z0-9-]+$/i.test(decoded);
-  const latinCandidate = isLatin ? decoded.toLowerCase() : slugify(decoded);
-  const isAll = latinCandidate === 'all' || decoded.toLowerCase() === 'all';
+  // Родитель (если мы на 2-м уровне) — пригодится для «полки» и крошек
+  let parent: { id: number; name: string; fullSlug: string } | null = null;
+  if (cat?.level === 2 && cat.parentId) {
+    parent = await prisma.category.findUnique({
+      where: { id: cat.parentId },
+      select: { id: true, name: true, fullSlug: true },
+    });
+  }
 
-  const cat = !isAll
-    ? await prisma.category.findFirst({
-        where: { OR: [{ slug: latinCandidate }, { name: decoded }] },
-        select: { id: true, name: true, seoH1: true },
-      })
-    : null;
+  // Навигационные категории (плитки): для level=1 — дети; для level=2 — сиблинги
+  let navCats: { id: number; name: string; fullSlug: string }[] = [];
+  let navTitle = '';
+
+  if (cat) {
+    if (cat.level === 1) {
+      navCats = await prisma.category.findMany({
+        where: { parentId: cat.id },
+        select: { id: true, name: true, fullSlug: true },
+        orderBy: { name: 'asc' },
+      });
+      if (navCats.length) navTitle = 'Подкатегории';
+    } else if (cat.level === 2 && cat.parentId) {
+      navCats = await prisma.category.findMany({
+        where: { parentId: cat.parentId },
+        select: { id: true, name: true, fullSlug: true },
+        orderBy: { name: 'asc' },
+      });
+      if (navCats.length) navTitle = parent ? `Разделы — ${parent.name}` : 'Разделы';
+    }
+  }
 
   const rating = sp.rating ? parseFloat(sp.rating) : undefined;
   const passport = sp.passport === '1' || sp.passport === 'true';
   const contract = sp.contract === '1' || sp.contract === 'true';
 
   // формируем where
-const whereAND: any[] = [];
-if (cat) whereAND.push({ categories: { some: { categoryId: cat.id } } });
-if (sp.city) whereAND.push({ city: { contains: sp.city } });
-if (rating) whereAND.push({ rating: { gte: rating } });
+  const whereAND: any[] = [];
+  if (cat) {
+    // Если нужно, чтобы родитель тянул и детей — можно сделать IN по id детей+родителя.
+    whereAND.push({ categories: { some: { categoryId: cat.id } } });
+  }
+  if (sp.city) whereAND.push({ city: { contains: sp.city } });
+  if (rating) whereAND.push({ rating: { gte: rating } });
 
-if (sp.q) {
-  const q = sp.q.toLowerCase();
-  whereAND.push({
-    OR: [
-      { nameSearch:  { contains: q } },
-      { titleSearch: { contains: q } },
-      {
-        services: {
-          some: {
-            OR: [
-              { nameSearch:        { contains: q } },
-              { descriptionSearch: { contains: q } },
-            ],
+  if (sp.q) {
+    const q = sp.q.toLowerCase();
+    whereAND.push({
+      OR: [
+        { nameSearch:  { contains: q } },
+        { titleSearch: { contains: q } },
+        {
+          services: {
+            some: {
+              OR: [
+                { nameSearch:        { contains: q } },
+                { descriptionSearch: { contains: q } },
+              ],
+            },
           },
         },
-      },
-    ],
-  });
-}
-
-
-if (passport) whereAND.push({ passportVerified: true });
-if (contract) whereAND.push({ worksByContract: true });
-
+      ],
+    });
+  }
+  if (passport) whereAND.push({ passportVerified: true });
+  if (contract) whereAND.push({ worksByContract: true });
 
   // пагинация
   const pageParam = Number.parseInt(sp.page || '1', 10);
@@ -198,15 +235,46 @@ if (contract) whereAND.push({ worksByContract: true });
 
   const totalPages = Math.max(1, Math.ceil(totalCount / PER_PAGE));
   const currentPage = Math.min(page, totalPages);
-  const title = isAll ? 'Все исполнители' : (cat?.name ?? decoded);
-  const h1 = isAll ? 'Все исполнители' : (cat?.seoH1 || title);
 
-  // текущий вид (по умолчанию LIST)
+  const title = isAll
+    ? 'Все исполнители'
+    : (cat?.name ?? (() => { try { return decodeURIComponent(slugs[slugs.length-1] || 'Категория'); } catch { return slugs[slugs.length-1] || 'Категория'; } })());
+
+  const h1 = isAll ? 'Все исполнители' : (cat?.seoH1 || title);
   const view: 'grid' | 'list' = sp.view === 'grid' || sp.view === 'list' ? sp.view : 'list';
 
   // диапазон отображаемых позиций
   const from = totalCount === 0 ? 0 : (currentPage - 1) * PER_PAGE + 1;
   const to = Math.min(currentPage * PER_PAGE, totalCount);
+
+  // Хлебные крошки (метки по ИМЕНАМ, а не по slug-ам)
+  const crumbs: { href: string; label: string }[] = [
+    { href: '/', label: 'Главная' },
+    { href: '/#categories', label: 'Категории' },
+  ];
+  if (isAll) {
+    crumbs.push({ href: '/c/all', label: 'Все исполнители' });
+  } else if (cat) {
+    if (cat.level === 1) {
+      crumbs.push({ href: `/c/${cat.fullSlug}`, label: cat.name });
+    } else if (cat.level === 2) {
+      if (parent) crumbs.push({ href: `/c/${parent.fullSlug}`, label: parent.name });
+      crumbs.push({ href: `/c/${cat.fullSlug}`, label: cat.name });
+    } else {
+      // fallback по сегментам
+      slugs.forEach((seg, i) => {
+        const path = `/c/${slugs.slice(0, i + 1).map(encodeURIComponent).join('/')}`;
+        const label = (() => { try { return decodeURIComponent(seg); } catch { return seg; } })();
+        crumbs.push({ href: path, label });
+      });
+    }
+  }
+
+  // Текущий fullSlug — чтобы подсветить активную плитку
+  const currentFull = slugs
+    .map(s => { try { return decodeURIComponent(s); } catch { return s; } })
+    .map(s => s.toLowerCase())
+    .join('/');
 
   return (
     <>
@@ -215,14 +283,13 @@ if (contract) whereAND.push({ worksByContract: true });
         <div className="container">
           <nav aria-label="breadcrumb" className="mb-2">
             <ol className="breadcrumb mb-0">
-              <li className="breadcrumb-item">
-                <a href="/" className="link-muted text-decoration-none">Главная</a>
-              </li>
-              <li className="breadcrumb-item">
-                <a href="/#categories" className="link-muted text-decoration-none">Категории</a>
-              </li>
+              {crumbs.slice(0, -1).map((c, i) => (
+                <li className="breadcrumb-item" key={i}>
+                  <a href={c.href} className="link-muted text-decoration-none">{c.label}</a>
+                </li>
+              ))}
               <li className="breadcrumb-item active" aria-current="page">
-                {title}
+                {crumbs[crumbs.length - 1]?.label || title}
               </li>
             </ol>
           </nav>
@@ -249,6 +316,34 @@ if (contract) whereAND.push({ worksByContract: true });
       {/* CONTENT */}
       <main className="py-5">
         <div className="container">
+          {/* Полка подкатегорий / соседних разделов */}
+          {navCats.length > 0 && (
+            <section className="mb-4">
+              <div className="d-flex align-items-end justify-content-between mb-3">
+                <div>
+                  <h2 className="h5 mb-1">{navTitle}</h2>
+                  <small className="text-secondary">Выберите нужное направление</small>
+                </div>
+              </div>
+              <div className="row g-3 g-md-4">
+                {navCats.map((c) => {
+                  const isActive = c.fullSlug.toLowerCase() === currentFull;
+                  return (
+                    <div className="col-6 col-md-4 col-lg-3" key={c.id}>
+                      <a className="text-decoration-none d-block" href={`/c/${c.fullSlug}`}>
+                        <div className={`tile ${isActive ? 'border border-primary' : ''}`}>
+                          <i className="bi bi-collection text-primary" />
+                          <div className="title mt-2">{c.name}</div>
+                          <div className="muted">Перейти</div>
+                        </div>
+                      </a>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           <div className="row g-4">
             {/* Sidebar */}
             <aside className="col-lg-3 order-lg-1">
@@ -309,7 +404,7 @@ if (contract) whereAND.push({ worksByContract: true });
                       <i className="bi bi-funnel me-1" />
                       Применить
                     </button>
-                    <a href={`/c/${rawSlug}`} className="btn btn-outline-secondary btn-sm">
+                    <a href={buildHref(slugs, {}, {})} className="btn btn-outline-secondary btn-sm">
                       <i className="bi bi-arrow-repeat me-1" />
                       Сбросить
                     </a>
@@ -331,14 +426,14 @@ if (contract) whereAND.push({ worksByContract: true });
                 {/* Переключатель вида */}
                 <div className="btn-group" role="group" aria-label="Вид списка">
                   <a
-                    href={buildHref(rawSlug, sp, { view: 'grid' })}
+                    href={buildHref(slugs, sp, { view: 'grid' })}
                     className={`btn btn-outline-secondary btn-sm ${view === 'grid' ? 'active' : ''}`}
                     title="Плитка"
                   >
                     <i className="bi bi-grid-3x3-gap" />
                   </a>
                   <a
-                    href={buildHref(rawSlug, sp, { view: 'list' })}
+                    href={buildHref(slugs, sp, { view: 'list' })}
                     className={`btn btn-outline-secondary btn-sm ${view === 'list' ? 'active' : ''}`}
                     title="Список"
                   >
@@ -358,6 +453,7 @@ if (contract) whereAND.push({ worksByContract: true });
                             className="avatar me-3"
                             src={
                               p.avatarUrl ||
+                              // @ts-ignore: возможное поле из старой версии
                               p.projects?.[0]?.imageUrl ||
                               `https://picsum.photos/seed/ava${p.id}/140`
                             }
@@ -378,7 +474,6 @@ if (contract) whereAND.push({ worksByContract: true });
                                 </>
                               )}
                             </div>
-                            {/* Бейджи статусов */}
                             <div className="d-flex align-items-center gap-2 flex-wrap mt-1">
                               {p.passportVerified && (
                                 <span className="badge bg-success-subtle text-success border">
@@ -391,15 +486,14 @@ if (contract) whereAND.push({ worksByContract: true });
                                 </span>
                               )}
                             </div>
-                            {/* Описание (до 500 символов) */}
                             {p.about && (
                               <div className="small text-muted mt-2">
                                 {truncateText(p.about, 500)}
                               </div>
                             )}
                           </div>
-                     
                         </div>
+
                         <ul className="list-unstyled small text-secondary mb-3">
                           {(p.services || []).slice(0, 3).map((s) => (
                             <li key={s.id}>
@@ -433,6 +527,7 @@ if (contract) whereAND.push({ worksByContract: true });
                           style={{ width: 88, height: 88 }}
                           src={
                             p.avatarUrl ||
+                            // @ts-ignore
                             p.projects?.[0]?.imageUrl ||
                             `https://picsum.photos/seed/ava${p.id}/140`
                           }
@@ -476,16 +571,12 @@ if (contract) whereAND.push({ worksByContract: true });
                               <a href={`/provider/${p.id}`} className="btn btn-primary">
                                 Смотреть профиль
                               </a>
-                               <FavoriteButton
-    provider={{ id: p.id, name: p.name, avatarUrl: p.avatarUrl, city: p.city }}
-  />
+                              <FavoriteButton provider={{ id: p.id, name: p.name, avatarUrl: p.avatarUrl, city: p.city }} />
                             </div>
                           </div>
 
                           {p.about && (
-                            <div className="small text-muted mt-2">
-                              {truncateText(p.about, 500)}
-                            </div>
+                            <div className="small text-muted mt-2">{truncateText(p.about, 500)}</div>
                           )}
 
                           <ul className="list-unstyled small text-secondary mt-3 mb-0">
@@ -522,7 +613,11 @@ if (contract) whereAND.push({ worksByContract: true });
                 <nav className="mt-4" aria-label="Навигация по страницам">
                   <ul className="pagination justify-content-center">
                     <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
-                      <a className="page-link" href={buildHref(rawSlug, sp, { page: currentPage - 1 })} aria-label="Назад">
+                      <a
+                        className="page-link"
+                        href={buildHref(slugs, sp, { page: currentPage - 1 })}
+                        aria-label="Назад"
+                      >
                         Назад
                       </a>
                     </li>
@@ -534,13 +629,17 @@ if (contract) whereAND.push({ worksByContract: true });
                         </li>
                       ) : (
                         <li key={p} className={`page-item ${p === currentPage ? 'active' : ''}`}>
-                          <a className="page-link" href={buildHref(rawSlug, sp, { page: p })}>{p}</a>
+                          <a className="page-link" href={buildHref(slugs, sp, { page: p })}>{p}</a>
                         </li>
                       )
                     )}
 
                     <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
-                      <a className="page-link" href={buildHref(rawSlug, sp, { page: currentPage + 1 })} aria-label="Вперёд">
+                      <a
+                        className="page-link"
+                        href={buildHref(slugs, sp, { page: currentPage + 1 })}
+                        aria-label="Вперёд"
+                      >
                         Вперёд
                       </a>
                     </li>

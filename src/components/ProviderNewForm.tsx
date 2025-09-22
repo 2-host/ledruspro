@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 type ServiceRow = { name: string; priceFrom?: number | ''; unit?: string; desc?: string };
-type Category = { id: number; name: string; slug: string };
+type CategoryNode = { id: number; name: string; slug: string; fullSlug?: string; children?: CategoryNode[] };
 type Project = { title: string; files: File[] };
 
 export default function ProviderNewForm() {
@@ -28,14 +28,14 @@ export default function ProviderNewForm() {
   // 🔥 Новая структура проектов: на каждый проект — массив файлов
   const [projects, setProjects] = useState<Project[]>([{ title: 'Проект #1', files: [] }]);
 
-  const [cats, setCats] = useState<Category[]>([]);
+  const [cats, setCats] = useState<CategoryNode[]>([]);
   const [selectedCatIds, setSelectedCatIds] = useState<number[]>([]);
 
   useEffect(() => {
-    fetch('/api/categories')
-      .then(r => r.json())
-      .then((data: Category[]) => setCats(data))
-      .catch(() => setCats([]));
+  fetch('/api/categories')
+    .then(r => r.json())
+    .then((data: CategoryNode[]) => setCats(data))
+    .catch(() => setCats([]));
   }, []);
 
   const toggleCat = (id: number) =>
@@ -183,27 +183,53 @@ export default function ProviderNewForm() {
                 </div>
 
                 {/* Категории */}
-                <div className="card-modern p-3 mb-3">
-                  <h2 className="h6 mb-2">Категории</h2>
-                  <div className="row">
-                    {cats.map(c => (
-                      <div className="col-sm-6 col-md-4" key={c.id}>
-                        <div className="form-check">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            id={`cat-${c.id}`}
-                            checked={selectedCatIds.includes(c.id)}
-                            onChange={() => toggleCat(c.id)}
-                          />
-                          <label className="form-check-label" htmlFor={`cat-${c.id}`}>{c.name}</label>
-                        </div>
-                      </div>
-                    ))}
-                    {cats.length === 0 && <div className="text-secondary px-2">Категории не найдены</div>}
-                  </div>
-                  <div className="form-text">Можно выбрать несколько.</div>
-                </div>
+<div className="card-modern p-3 mb-3">
+  <h2 className="h6 mb-2">Категории</h2>
+
+  <div className="vstack gap-2">
+    {cats.map((root) => (
+      <div key={root.id}>
+        {/* Корневая категория */}
+        <div className="form-check">
+          <input
+            className="form-check-input"
+            type="checkbox"
+            id={`cat-${root.id}`}
+            checked={selectedCatIds.includes(root.id)}
+            onChange={() => toggleCat(root.id)}
+          />
+          <label className="form-check-label fw-semibold" htmlFor={`cat-${root.id}`}>
+            {root.name}
+          </label>
+        </div>
+
+        {/* Дети второго уровня */}
+        {root.children && root.children.length > 0 && (
+          <div className="ms-4 mt-1">
+            {root.children.map((child) => (
+              <div className="form-check" key={child.id}>
+                <input
+                  className="form-check-input"
+                  type="checkbox"
+                  id={`cat-${child.id}`}
+                  checked={selectedCatIds.includes(child.id)}
+                  onChange={() => toggleCat(child.id)}
+                />
+                <label className="form-check-label" htmlFor={`cat-${child.id}`}>
+                  {child.name}
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    ))}
+
+    {cats.length === 0 && <div className="text-secondary px-2">Категории не найдены</div>}
+  </div>
+
+  <div className="form-text">Можно выбрать несколько (как родительские, так и подкатегории).</div>
+</div>
 
                 {/* Услуги */}
                 {/* Услуги */}
