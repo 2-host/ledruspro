@@ -9,15 +9,25 @@ datasource db {
 }
 
 model Category {
-  id    Int       @id @default(autoincrement())
-  name  String
-  slug  String    @unique
+  id             Int        @id @default(autoincrement())
+  name           String
+  slug           String
   seoTitle       String?
   seoDescription String?
   seoKeywords    String?
   seoH1          String?
-  // связи
+
+  parentId Int?
+  parent   Category?  @relation("CategoryChildren", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryChildren")
+
+  level     Int        @default(1)
+  fullSlug  String?    // 👈 временно optional и без @unique
+
   ProviderCategory ProviderCategory[]
+
+  @@unique([parentId, slug])
+  @@index([parentId])
 }
 
 model Provider {

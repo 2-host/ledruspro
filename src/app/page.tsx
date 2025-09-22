@@ -111,7 +111,7 @@ export default async function HomePage() {
               <h2 className="h3 mb-1">Категории</h2>
               <small className="text-secondary">Выберите направление работ</small>
             </div>
-            <a href="/c/all" className="btn btn-outline-primary btn-sm">
+            <a href="/categories" className="btn btn-outline-primary btn-sm">
               Все категории <i className="bi bi-chevron-right" />
             </a>
           </div>
