@@ -1,11 +1,21 @@
+// app/admin/(protected)/layout.tsx
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { getSessionSecret } from '@/src/lib/adminAuth';
 
-export default async function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
-  const c = await cookies();
-  const sess = c.get('admin_session')?.value;
-  const ok = !!sess && sess === (process.env.ADMIN_SESSION_SECRET || '');
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
+export default async function ProtectedAdminLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const c = cookies(); // в серверных компонентов это синхронно
+  const sess = c.get('admin_session')?.value ?? null;
+  const ok = !!sess && sess === getSessionSecret();
 
   if (!ok) {
     redirect('/admin/login?from=/admin');

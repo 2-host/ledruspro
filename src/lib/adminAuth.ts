@@ -1,12 +1,20 @@
+// src/lib/adminAuth.ts
 import { cookies } from 'next/headers';
 
 export function getSessionSecret(): string {
-  // единая точка правды; в dev подставляем дефолт
-  return process.env.ADMIN_SESSION_SECRET || 'dev-admin-secret';
+  const secret = (process.env.ADMIN_SESSION_SECRET || '').trim();
+  if (!secret) {
+    // в дев-режиме можно подставить дефолт
+    if (process.env.NODE_ENV !== 'production') {
+      return 'dev-admin-secret';
+    }
+    throw new Error('ADMIN_SESSION_SECRET is not set');
+  }
+  return secret;
 }
 
-export async function isAdminServer(): Promise<boolean> {
-  const c = await cookies();
-  const token = c.get('admin_session')?.value;
+export function isAdminServer(): boolean {
+  const c = cookies();
+  const token = c.get('admin_session')?.value ?? null;
   return token === getSessionSecret();
 }
